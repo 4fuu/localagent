@@ -11,7 +11,7 @@
 curl -fsSL https://pixi.sh/install.sh | bash
 
 # 安装项目依赖
-pixi install
+pixi run install-all
 ```
 
 ### 添加依赖
@@ -66,6 +66,7 @@ pixi run --environment localagent python main.py
 export DASHSCOPE_API_KEY="your-api-key"
 
 # 2. 启动主进程
+pixi run install-all
 pixi run localagent_start
 ```
 

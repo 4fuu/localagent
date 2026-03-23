@@ -41,7 +41,7 @@ All singleton services register with the Hub and communicate via WebSocket RPC. 
 curl -fsSL https://pixi.sh/install.sh | bash
 
 # 2. Install dependencies
-pixi install
+pixi run install-all
 pixi run sandbox-build-image
 
 # 3. Initialize config
@@ -55,6 +55,8 @@ pixi run localagent_start
 ```
 
 Then edit `config.toml` for your setup. At minimum, make sure `[agent]` points to valid `chat` and `embedding` profiles.
+
+Note: `pixi install` only installs a single environment by default. This project needs both `localagent` and `zvec`, so use `pixi run install-all`.
 
 ## Configuration
 

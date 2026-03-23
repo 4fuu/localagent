@@ -65,9 +65,11 @@ curl -fsSL https://pixi.sh/install.sh | bash
 ### 2. 安装依赖
 
 ```bash
-pixi install
+pixi run install-all
 pixi run sandbox-build-image
 ```
+
+说明：`pixi install` 默认只安装一个 environment。这个项目需要 `localagent` 和 `zvec` 两个环境，所以这里统一使用 `pixi run install-all`。
 
 ### 3. 初始化配置
 
