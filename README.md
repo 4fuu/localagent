@@ -185,6 +185,8 @@ read_only_rootfs = true
 - [x] 技能系统
 - [x] 沙箱执行
 - [x] 定时任务
+- [ ] 微信 ClawBot 网关支持
+- [ ] 部分 OpenClaw 生态兼容
 - [ ] Web 管理面板（计划中）
 
 ## 📄 许可证

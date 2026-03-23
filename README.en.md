@@ -140,6 +140,8 @@ pids_limit = 256
 
 ## Roadmap
 
+- **WeChat ClawBot gateway support** (planned)
+- **Partial OpenClaw ecosystem compatibility** (planned)
 - **Web admin panel** — Dashboard, usage stats, config editor, and runtime control via browser (planned)
 
 ## License
