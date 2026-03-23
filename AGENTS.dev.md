@@ -53,9 +53,9 @@ pixi run --environment localagent python main.py
 | `src/provider/`   | LLM 服务商抽象：BaseOpenAI (`base.py`)、Qwen (`qwen.py`)、tool 装饰器 (`tool_decorator.py`)、Embedding (`embedding.py`) |
 | `src/index/`      | 索引服务：IndexService (`service.py`)、IndexClient (`client.py`)、IndexSource (`source.py`) |
 | `src/vec/`        | 向量数据库：zvec server (`server.py`)、VecClient (`client.py`)、启动脚本 (`launch.py`) |
-| `src/core/`       | 领域模块：收件箱 (`inbox.py`)、记忆 (`memory.py`)、任务 (`task.py`)、技能 (`skills.py`)、统一用户 (`identity.py`)、工作区 (`workspace.py`) |
+| `src/core/`       | 领域模块：收件箱 (`inbox.py`)、记忆 (`memory.py`)、任务 (`task.py`)、技能 (`skills.py`)、统一用户 (`identity.py`)、运行时文件系统 (`runtime_fs.py`) |
 | `skills/`         | 运行时：技能模块存储                                         |
-| `.localagent/workspaces/` | 运行时：子代理操作空间（按 person/conversation 隔离，自动创建） |
+| `.localagent/runtime/workspaces/` | 运行时：子代理操作空间（按 person/conversation 隔离，自动创建） |
 
 **依赖方向**：`agent → provider → core/index → hub/vec`，各层单向无环。
 
@@ -132,7 +132,7 @@ python -m src.agent.sub --role=task --hub=ws://127.0.0.1:9600 --task=t-abc12345
 | `task.py` | TaskSource 索引源，任务创建/停止 |
 | `skills.py` | SkillsSource 索引源，技能模块加载 |
 | `identity.py` | 外部账号到内部 `person_id` 的统一映射 |
-| `workspace.py` | 子代理工作区管理（私聊优先按 `person_id`，多人会话按 `conversation_id`） |
+| `runtime_fs.py` | 运行时目录布局与 task workspace 管理（私聊优先按 `person_id`，多人会话按 `conversation_id`） |
 
 ### 添加新服务
 

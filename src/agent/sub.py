@@ -40,8 +40,8 @@ from ..core.store import (
     parse_task_outcome,
     strip_structured_outcome_block,
 )
-from ..core.workspace import PROJECT_ROOT, resolve_agent_workspace_root
 from ..core.runtime_fs import (
+    PROJECT_ROOT,
     RUNTIME_ROOT,
     RUNTIME_SKILLS_ROOT as HOST_RUNTIME_SKILLS_ROOT,
     RUNTIME_SOUL_PATH as HOST_RUNTIME_SOUL_PATH,
@@ -127,8 +127,6 @@ def _resolve_agent_roots(
     role: str,
     conversation_id: str,
     runtime_identity: dict[str, Any],
-    is_admin: bool,
-    sandboxed: bool,
 ) -> dict[str, str | bool]:
     ensure_runtime_layout()
     if role == "task":
@@ -161,12 +159,10 @@ def _resolve_agent_roots(
     host_skills_root = str(HOST_RUNTIME_SKILLS_ROOT.resolve())
     host_soul_path = str((PROJECT_ROOT / "SOUL.md").resolve())
     host_cache_root = str((PROJECT_ROOT / ".localagent" / "sandbox-cache").resolve())
-    host_workspace_root = str(resolve_agent_workspace_root(
+    host_workspace_root = str(resolve_runtime_workspace_root(
         conversation_id=conversation_id,
         person_id=str(runtime_identity.get("person_id", "")).strip(),
         is_multi_party=bool(runtime_identity.get("is_multi_party", False)),
-        is_admin=is_admin,
-        sandboxed=sandboxed,
     ))
     return {
         "containerized": False,
@@ -979,8 +975,6 @@ def _run_agent(args: argparse.Namespace) -> None:
         role=args.role,
         conversation_id=conversation_id,
         runtime_identity=runtime_identity,
-        is_admin=is_admin,
-        sandboxed=sandboxed,
     )
     if bool(roots.get("containerized", False)):
         sandboxed = True

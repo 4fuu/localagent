@@ -50,7 +50,7 @@ main.py  ──→  Runtime.init()
 | `src/vec/` | 向量数据库：zvec server、VecClient |
 | `src/core/` | 领域模块：收件箱、记忆、任务、技能、统一用户、工作区 |
 | `skills/` | 运行时：技能模块存储 |
-| `.localagent/workspaces/` | 运行时：子代理操作空间（按用户/会话隔离，自动创建） |
+| `.localagent/runtime/workspaces/` | 运行时：子代理操作空间（按用户/会话隔离，自动创建） |
 
 依赖方向：`agent → provider → core/index → hub/vec`，各层单向无环。
 
