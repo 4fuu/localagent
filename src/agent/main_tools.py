@@ -20,6 +20,7 @@ from ..core.secrets import (
     person_scope,
     set_secret,
 )
+from ..core.skills import skills_catalog
 from ..core.store import Store
 from ..core.store import conversation_state_bind_task
 from ..index import IndexClient
@@ -91,6 +92,10 @@ def _normalize_unique_strs(values: list[Any]) -> list[str]:
 def _normalize_task_type(value: str) -> str:
     normalized = str(value or "").strip().lower()
     return normalized if normalized in _TASK_TYPES else ""
+
+
+def _normalize_skill_slug(value: str) -> str:
+    return str(value or "").strip().lower().replace("_", "-")
 
 
 def _pick_auto_context_refs(
@@ -1004,6 +1009,94 @@ def manage_wake(
 
 
 @tool
+def manage_skills(
+    state: AgentState,
+    action: str,
+    skill: str = "",
+    conversation_id: str = "",
+) -> str:
+    """查看当前启用的 skills，或启用/禁用某个 skill。
+
+    参数：
+    - action (string): `list` / `enable` / `disable`
+    - skill (string, 可选): skill 名称或目录 slug；`enable` / `disable` 时必填
+    - conversation_id (string, 可选): 兼容保留字段，当前忽略
+    """
+    normalized_action = action.strip().lower()
+    del conversation_id
+    host_skills_path = (
+        str(getattr(state, "host_skills_path", "")).strip()
+        or str(getattr(state, "skills_path", "")).strip()
+    )
+    available_items = skills_catalog(host_skills_path)
+    available_by_slug = {
+        _normalize_skill_slug(item.get("skill", "")): item
+        for item in available_items
+        if _normalize_skill_slug(item.get("skill", ""))
+    }
+
+    enabled: list[str] = []
+    with Store() as store:
+        enabled = [
+            _normalize_skill_slug(item)
+            for item in store.enabled_skills_read()
+            if _normalize_skill_slug(item)
+        ]
+
+    if normalized_action == "list":
+        return _result({
+            "ok": True,
+            "enabled_skills": enabled,
+            "available_skills": [
+                {
+                    "skill": slug,
+                    "name": str(item.get("name", "")).strip() or slug,
+                    "description": str(item.get("description", "")).strip(),
+                    "enabled": slug in enabled,
+                }
+                for slug, item in available_by_slug.items()
+            ],
+        })
+
+    if normalized_action not in {"enable", "disable"}:
+        return _result({"ok": False, "error": f"未知 action: {action}"})
+
+    normalized_skill = _normalize_skill_slug(skill)
+    if not normalized_skill:
+        return _result({"ok": False, "error": "skill 不能为空"})
+    if normalized_skill not in available_by_slug:
+        return _result({"ok": False, "error": f"skill 不存在: {normalized_skill}"})
+
+    with Store() as store:
+        current_enabled = [
+            _normalize_skill_slug(item)
+            for item in store.enabled_skills_read()
+            if _normalize_skill_slug(item)
+        ]
+        updated_enabled = (
+            _normalize_unique_strs([*current_enabled, normalized_skill])
+            if normalized_action == "enable"
+            else [
+                item
+                for item in current_enabled
+                if _normalize_skill_slug(item) != normalized_skill
+            ]
+        )
+        updated_enabled = store.enabled_skills_write(updated_enabled)
+
+    item = available_by_slug[normalized_skill]
+    return _result({
+        "ok": True,
+        "action": normalized_action,
+        "skill": normalized_skill,
+        "name": str(item.get("name", "")).strip() or normalized_skill,
+        "description": str(item.get("description", "")).strip(),
+        "enabled_skills": updated_enabled,
+        "enabled": normalized_skill in updated_enabled,
+    })
+
+
+@tool
 def manage_env(
     state: AgentState,
     action: str,
@@ -1074,5 +1167,6 @@ __all__ = [
     "manage_task",
     "manage_cron",
     "manage_wake",
+    "manage_skills",
     "manage_env",
 ]

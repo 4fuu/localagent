@@ -9,13 +9,13 @@ from .tools import (
     bash_write,
     edit,
     read,
-    search_skills,
     write,
 )
 from .main_tools import (
     add_note,
     manage_cron,
     manage_env,
+    manage_skills,
     manage_task,
     manage_wake,
     search_archive,
@@ -35,11 +35,11 @@ __all__ = [
     "bash_wait",
     "bash_stop",
     "bash_list",
-    "search_skills",
     "add_note",
     "search_archive",
     "manage_task",
     "manage_wake",
     "manage_cron",
+    "manage_skills",
     "manage_env",
 ]

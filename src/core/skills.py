@@ -58,10 +58,38 @@ class SkillsSource(IndexSource):
         return "\n".join(parts)
 
 
-def skills_list(path: str, page: int = 1, page_size: int = 10) -> dict:
-    """载入路径下所有子文件夹的 SKILL.md 描述，分页返回。"""
+def _skill_slug(entry: Path) -> str:
+    return entry.name.strip().lower().replace("_", "-")
+
+
+def skills_catalog(path: str) -> list[dict[str, str]]:
+    """返回本地 skills 元数据目录。"""
     base = Path(path)
     if not base.is_dir():
+        return []
+
+    items: list[dict[str, str]] = []
+    for entry in sorted(base.iterdir()):
+        if not entry.is_dir():
+            continue
+        skill_file = entry / "SKILL.md"
+        if not skill_file.is_file():
+            continue
+        content = skill_file.read_text(encoding="utf-8")
+        meta = _parse_frontmatter(content) or {}
+        items.append({
+            "skill": _skill_slug(entry),
+            "name": str(meta.get("name") or entry.name).strip(),
+            "description": str(meta.get("description") or "").strip(),
+            "path": str(skill_file),
+        })
+    return items
+
+
+def skills_list(path: str, page: int = 1, page_size: int = 10) -> dict:
+    """载入路径下所有子文件夹的 SKILL.md 描述，分页返回。"""
+    catalog = skills_catalog(path)
+    if not catalog:
         return {
             "items": [],
             "total": 0,
@@ -70,20 +98,16 @@ def skills_list(path: str, page: int = 1, page_size: int = 10) -> dict:
             "total_pages": 0,
         }
 
-    skills = []
-    for entry in sorted(base.iterdir()):
-        if not entry.is_dir():
-            continue
-        skill_file = entry / "SKILL.md"
-        if not skill_file.is_file():
-            continue
-        content = skill_file.read_text(encoding="utf-8")
-        meta = _parse_frontmatter(content)
-        if meta:
-            meta["path"] = str(skill_file)
-            skills.append(meta)
+    skills: list[dict[str, str]] = []
+    for item in catalog:
+        skills.append({
+            "skill": item["skill"],
+            "name": item["name"],
+            "description": item["description"],
+            "path": item["path"],
+        })
 
-    total = len(skills)
+    total = len(catalog)
     total_pages = (total + page_size - 1) // page_size if total > 0 else 0
     start = (page - 1) * page_size
     return {

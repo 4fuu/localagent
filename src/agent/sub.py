@@ -62,6 +62,7 @@ from .main_tools import (
     add_note,
     manage_cron,
     manage_env,
+    manage_skills,
     manage_task,
     manage_user_profile,
     manage_wake,
@@ -82,7 +83,6 @@ from .tools import (
     bash_wait,
     bash_write,
     read,
-    search_skills,
     write,
 )
 
@@ -158,7 +158,7 @@ def _resolve_agent_roots(
         }
 
     host_project_root = str(PROJECT_ROOT.resolve())
-    host_skills_root = str((PROJECT_ROOT / "skills").resolve())
+    host_skills_root = str(HOST_RUNTIME_SKILLS_ROOT.resolve())
     host_soul_path = str((PROJECT_ROOT / "SOUL.md").resolve())
     host_cache_root = str((PROJECT_ROOT / ".localagent" / "sandbox-cache").resolve())
     host_workspace_root = str(resolve_agent_workspace_root(
@@ -685,6 +685,7 @@ def _build_main_tools(wake_mode: str = "") -> list:
         manage_user_profile,
         manage_cron,
         manage_env,
+        manage_skills,
         manage_task,
         manage_wake,
     ]
@@ -722,7 +723,6 @@ def _build_task_tools(task_type: str = "general") -> list:
         bash_wait,
         bash_stop,
         bash_list,
-        search_skills,
     ]
 
     if normalized == "reply":

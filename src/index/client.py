@@ -21,7 +21,6 @@ class IndexClient:
 
     Usage:
         client = IndexClient("ws://127.0.0.1:9600")
-        client.sync("skills", "/path/to/skills")
         results = client.search("关键词")
         client.close()
     """
@@ -106,7 +105,7 @@ class IndexClient:
         Args:
             query: 查询文本。
             topk: 返回数量。
-            sources: 搜索前同步的源列表，如 [{"source": "skills", "path": "/..."}]。
+            sources: 搜索前同步的源列表。
             filter: 可选的过滤表达式，传给 zvec query。
 
         Returns:
@@ -118,22 +117,6 @@ class IndexClient:
         if filter:
             payload["filter"] = filter
         resp = self._call("index.search", payload)
-        if not resp["ok"]:
-            raise RuntimeError(resp["error"])
-        return resp["results"]
-
-    def search_skills(
-        self,
-        query: str,
-        *,
-        topk: int = 10,
-        path: str,
-    ) -> list[dict[str, Any]]:
-        """Search skills using hybrid (dense + BM25) retrieval."""
-        resp = self._call(
-            "index.search_skills",
-            {"query": query, "topk": topk, "path": path},
-        )
         if not resp["ok"]:
             raise RuntimeError(resp["error"])
         return resp["results"]

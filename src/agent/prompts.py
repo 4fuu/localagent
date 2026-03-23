@@ -8,6 +8,7 @@ from ..config import cfg
 from ..core.identity import infer_person_id
 from ..core.runtime_paths import RuntimePathMap
 from ..core.secrets import conversation_scope, list_secrets, person_scope
+from ..core.skills import skills_catalog
 from ..core.store import Store, conversation_state_active_topic, conversation_state_topic_summaries
 from ..index import IndexClient
 from .context_refs import read_task_context_refs
@@ -552,6 +553,38 @@ def _format_runtime_paths(
     return entry
 
 
+def _format_enabled_skills(
+    enabled_skill_slugs: list[str],
+    *,
+    role: str,
+    host_skills_root: str,
+    path_map: RuntimePathMap,
+) -> list[dict[str, Any]]:
+    normalized = {
+        str(item).strip().lower().replace("_", "-")
+        for item in enabled_skill_slugs
+        if str(item).strip()
+    }
+    if not normalized:
+        return []
+    entries: list[dict[str, Any]] = []
+    for item in skills_catalog(host_skills_root):
+        slug = str(item.get("skill", "")).strip().lower().replace("_", "-")
+        if not slug or slug not in normalized:
+            continue
+        entry: dict[str, Any] = {
+            "name": str(item.get("name", "")).strip() or slug,
+            "description": str(item.get("description", "")).strip(),
+        }
+        if role == "task":
+            skill_path = str(item.get("path", "")).strip()
+            entry["skill"] = slug
+            if skill_path:
+                entry["path"] = path_map.locator_to_runtime(skill_path)
+        entries.append(entry)
+    return entries
+
+
 def _format_event(item: dict[str, Any]) -> dict[str, Any]:
     entry: dict[str, Any] = {}
     entry["id"] = item.get("id", "")
@@ -912,6 +945,7 @@ def _build_prompt_data(
                         user_profiles.append(dict(candidate))
 
         conversation_env_keys: list[str] = []
+        enabled_skill_slugs = store.enabled_skills_read()
         person_id = ""
         if conversation_state:
             person_id = str(conversation_state.get("person_id", "")).strip()
@@ -954,6 +988,13 @@ def _build_prompt_data(
         data["user_profiles"] = user_profiles
     if conversation_env_keys:
         data["conversation_env"] = _format_env_keys(conversation_env_keys)
+    enabled_skills = _format_enabled_skills(
+        enabled_skill_slugs,
+        role=role,
+        host_skills_root=host_skills_root or skills_root,
+        path_map=path_map,
+    )
+    data["enabled_skills"] = enabled_skills
     data["runtime_paths"] = _format_runtime_paths(
         project_root=project_root,
         workspace_root=workspace_root,
@@ -993,7 +1034,7 @@ def _build_prompt_reading_guide(role: str) -> str:
             *common_lines,
             "- `instructions.dispatch_policy.manage_task_start` 对应 `manage_task(action=\"start\")` 的调度规则。",
             "- `instructions.dispatch_policy.task_done_handling` 对应 `completed_tasks` 与 `task_done_context` 的验收规则。",
-            "- main 的推荐阅读顺序：`inbox_messages` -> `completed_tasks` / `task_done_context` -> `conversation_state.current_topic` -> `pending_tasks` -> `recent_window` -> `recall_items` -> `user_profiles` -> `conversation_env` -> `runtime_paths` -> `wake_context`。",
+            "- main 的推荐阅读顺序：`inbox_messages` -> `completed_tasks` / `task_done_context` -> `conversation_state.current_topic` -> `pending_tasks` -> `recent_window` -> `recall_items` -> `enabled_skills` -> `user_profiles` -> `conversation_env` -> `runtime_paths` -> `wake_context`。",
             "- 下面开始是结构化 XML。",
         ]
         return "\n".join(lines)
@@ -1001,7 +1042,7 @@ def _build_prompt_reading_guide(role: str) -> str:
         *common_lines,
         "- `instructions.task_type_contract.task_type` 与 `task.task_type` 一一对应；其中给出该 task type 的能力边界和结果要求。",
         "- `instructions.task_outcome_schema` 规定 result 末尾 JSON 代码块的结构。",
-        "- task 的推荐阅读顺序：`task.goal` -> `task.task_type` -> `task.context_ref_ids` -> `conversation_state.current_topic` -> `recent_window` -> `recall_items` -> `runtime_paths` -> `user_customization` -> `wake_context`。",
+        "- task 的推荐阅读顺序：`task.goal` -> `task.task_type` -> `task.context_ref_ids` -> `conversation_state.current_topic` -> `recent_window` -> `recall_items` -> `enabled_skills` -> `runtime_paths` -> `user_customization` -> `wake_context`。",
         "- 下面开始是结构化 XML。",
     ]
     return "\n".join(lines)

@@ -12,6 +12,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from .runtime_fs import RUNTIME_SKILLS_ROOT, ensure_runtime_layout
+from .skills import skills_catalog
+
 logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -48,6 +51,15 @@ def _json_loads(text: str | None, default: Any = None) -> Any:
         return json.loads(text)
     except (json.JSONDecodeError, TypeError):
         return default
+
+
+def _default_enabled_skills() -> list[str]:
+    ensure_runtime_layout()
+    return [
+        str(item.get("skill", "")).strip()
+        for item in skills_catalog(str(RUNTIME_SKILLS_ROOT))
+        if str(item.get("skill", "")).strip()
+    ]
 
 
 def _is_locked_sqlite_error(exc: sqlite3.OperationalError) -> bool:
@@ -613,6 +625,7 @@ class Store:
                 is_multi_party    INTEGER NOT NULL DEFAULT 0,
                 active_topic_id   TEXT NOT NULL DEFAULT '',
                 topics            TEXT NOT NULL DEFAULT '[]',
+                enabled_skills    TEXT NOT NULL DEFAULT '[]',
                 session_constraints TEXT NOT NULL DEFAULT '[]',
                 session_facts     TEXT NOT NULL DEFAULT '[]',
                 current_focus     TEXT NOT NULL DEFAULT '',
@@ -634,6 +647,11 @@ class Store:
                 event_type      TEXT NOT NULL,
                 payload         TEXT NOT NULL DEFAULT '{}',
                 created_at      TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key             TEXT PRIMARY KEY,
+                value           TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS user_profiles (
@@ -853,6 +871,11 @@ class Store:
         )
         self._ensure_column(
             "conversation_states",
+            "enabled_skills",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )
+        self._ensure_column(
+            "conversation_states",
             "session_constraints",
             "TEXT NOT NULL DEFAULT '[]'",
         )
@@ -884,12 +907,42 @@ class Store:
         self._db.execute("UPDATE memories SET layer = 'archive' WHERE layer IN ('l1', 'l2')")
         self._db.commit()
 
-    def _ensure_column(self, table: str, column: str, spec: str) -> None:
+    def _ensure_column(self, table: str, column: str, spec: str) -> bool:
         rows = self._db.execute(f"PRAGMA table_info({table})").fetchall()
         existing = {str(row[1]) for row in rows}
         if column in existing:
-            return
+            return False
         self._db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {spec}")
+        return True
+
+    def setting_read(self, key: str, default: str = "") -> str:
+        row = self._db.execute(
+            "SELECT value FROM settings WHERE key = ?",
+            (key.strip(),),
+        ).fetchone()
+        if row is None:
+            return default
+        return str(row["value"])
+
+    def setting_write(self, key: str, value: str) -> None:
+        self._db.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+            (key.strip(), value),
+        )
+        self._db.commit()
+
+    def enabled_skills_read(self) -> list[str]:
+        stored = self.setting_read("enabled_skills", "")
+        if stored:
+            return _normalize_unique_texts(_json_loads(stored, []), limit=128)
+        defaults = _normalize_unique_texts(_default_enabled_skills(), limit=128)
+        self.setting_write("enabled_skills", _json_dumps(defaults))
+        return defaults
+
+    def enabled_skills_write(self, skills: list[str]) -> list[str]:
+        normalized = _normalize_unique_texts(skills, limit=128)
+        self.setting_write("enabled_skills", _json_dumps(normalized))
+        return normalized
 
     # ------------------------------------------------------------------
     # Memory CRUD
@@ -1716,6 +1769,7 @@ class Store:
         is_multi_party: bool | None = None,
         active_topic_id: str | None = None,
         topics: list[dict[str, Any]] | None = None,
+        enabled_skills: list[str] | None = None,
         session_constraints: list[str] | None = None,
         session_facts: list[str] | None = None,
         current_focus: str | None = None,
@@ -1745,6 +1799,7 @@ class Store:
                 "is_multi_party": bool(is_multi_party),
                 "active_topic_id": active_topic_id or "",
                 "topics": normalize_conversation_topics(topics),
+                "enabled_skills": _normalize_unique_texts(enabled_skills or [], limit=64),
                 "session_constraints": _normalize_unique_texts(session_constraints or [], limit=16),
                 "session_facts": _normalize_unique_texts(session_facts or [], limit=16),
                 "current_focus": current_focus if current_focus is not None else "",
@@ -1763,11 +1818,11 @@ class Store:
                 self._db.execute(
                     """INSERT INTO conversation_states
                        (conversation_id, version, gateway, user_id, person_id, is_multi_party,
-                        active_topic_id, topics, session_constraints, session_facts, current_focus,
+                        active_topic_id, topics, enabled_skills, session_constraints, session_facts, current_focus,
                         resolved_entities, open_questions, active_task_ids,
                         last_user_message_id, last_bot_message_id, last_delivery, last_result_summary,
                         recent_memory_ids, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         payload["conversation_id"],
                         payload["version"],
@@ -1777,6 +1832,7 @@ class Store:
                         1 if payload["is_multi_party"] else 0,
                         payload["active_topic_id"],
                         _json_dumps(payload["topics"]),
+                        _json_dumps(payload["enabled_skills"]),
                         _json_dumps(payload["session_constraints"]),
                         _json_dumps(payload["session_facts"]),
                         payload["current_focus"],
@@ -1821,6 +1877,11 @@ class Store:
                 normalize_conversation_topics(existing.get("topics", []) or [])
                 if topics is None else normalize_conversation_topics(topics)
             ),
+            "enabled_skills": (
+                existing.get("enabled_skills", [])
+                if enabled_skills is None
+                else _normalize_unique_texts(enabled_skills, limit=64)
+            ),
             "session_constraints": (
                 existing.get("session_constraints", [])
                 if session_constraints is None
@@ -1843,7 +1904,7 @@ class Store:
         }
         query = """UPDATE conversation_states
                SET version = ?, gateway = ?, user_id = ?, person_id = ?, is_multi_party = ?,
-                   active_topic_id = ?, topics = ?, session_constraints = ?, session_facts = ?, current_focus = ?,
+                   active_topic_id = ?, topics = ?, enabled_skills = ?, session_constraints = ?, session_facts = ?, current_focus = ?,
                    resolved_entities = ?, open_questions = ?, active_task_ids = ?,
                    last_user_message_id = ?, last_bot_message_id = ?, last_delivery = ?, last_result_summary = ?,
                    recent_memory_ids = ?, updated_at = ?
@@ -1856,6 +1917,7 @@ class Store:
             1 if updated["is_multi_party"] else 0,
             updated["active_topic_id"],
             _json_dumps(updated["topics"]),
+            _json_dumps(updated["enabled_skills"]),
             _json_dumps(updated["session_constraints"]),
             _json_dumps(updated["session_facts"]),
             updated["current_focus"],
@@ -1923,6 +1985,7 @@ class Store:
                     ),
                     active_topic_id=patch.get("active_topic_id"),
                     topics=patch.get("topics"),
+                    enabled_skills=patch.get("enabled_skills"),
                     session_constraints=patch.get("session_constraints"),
                     session_facts=patch.get("session_facts"),
                     current_focus=patch.get("current_focus"),
@@ -2126,6 +2189,10 @@ class Store:
             "is_multi_party": bool(row["is_multi_party"]) if "is_multi_party" in row.keys() else False,
             "active_topic_id": row["active_topic_id"] if "active_topic_id" in row.keys() else "",
             "topics": topics,
+            "enabled_skills": _json_loads(
+                row["enabled_skills"] if "enabled_skills" in row.keys() else "[]",
+                [],
+            ),
             "session_constraints": _json_loads(
                 row["session_constraints"] if "session_constraints" in row.keys() else "[]",
                 [],

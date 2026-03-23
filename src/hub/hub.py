@@ -120,7 +120,7 @@ class Hub:
         self._notify_delay = notify_delay
         self._notify_deadlines: dict[str, float] = {}
         self._notify_timer_handles: dict[str, asyncio.TimerHandle] = {}
-        # Typing indicator: agent_key -> (gateway, conversation_id)
+        # Typing indicator: running agent_key -> (gateway, conversation_id)
         self._typing_targets: dict[str, tuple[str, str]] = {}
         self._poll_task: asyncio.Task | None = None
         self._reap_interval = reap_interval
@@ -414,7 +414,16 @@ class Hub:
             agent_key = str(claim.get("claimed_by", "")).strip()
             if not agent_key:
                 continue
-            if not self._spawn_agent("main", payload=payload, agent_key=agent_key):
+            typing_target = self._normalize_typing_target(
+                str(claim.get("gateway", "")).strip(),
+                conversation_id,
+            )
+            if not self._spawn_agent(
+                "main",
+                payload=payload,
+                agent_key=agent_key,
+                typing_target=typing_target,
+            ):
                 try:
                     with Store() as store:
                         store.conversation_work_finish(
@@ -748,7 +757,6 @@ class Hub:
                 task_id=task_id,
                 message="[event] 收到新任务启动请求",
             )
-            self._register_typing_target(task_id)
             if self._has_task_capacity():
                 self._spawn_agent("task", task_id=task_id, payload=startup_payload)
             else:
@@ -980,6 +988,7 @@ class Hub:
         payload: str = "",
         task_id: str = "",
         agent_key: str = "",
+        typing_target: tuple[str, str] | None = None,
     ) -> bool:
         if self._stopping:
             logger.debug("Hub is stopping, skip spawning role=%s", role)
@@ -1043,6 +1052,11 @@ class Hub:
         self._processes[key] = proc
         if role == "main":
             self._main_conversations[key] = conversation_id
+        resolved_typing_target = typing_target
+        if resolved_typing_target is None and role == "task":
+            resolved_typing_target = self._resolve_task_typing_target(task_id)
+        if resolved_typing_target is not None:
+            self._register_typing_target(key, *resolved_typing_target)
         return True
 
     def _reap_processes(self) -> None:
@@ -1063,30 +1077,57 @@ class Hub:
     # Typing indicator
     # ------------------------------------------------------------------
 
-    def _register_typing_target(self, task_id: str) -> None:
+    @staticmethod
+    def _normalize_typing_target(gateway: str, conversation_id: str) -> tuple[str, str] | None:
+        normalized_gateway = gateway.strip()
+        normalized_conversation_id = conversation_id.strip()
+        if not normalized_gateway or not normalized_conversation_id:
+            return None
+        return normalized_gateway, normalized_conversation_id
+
+    def _resolve_task_typing_target(self, task_id: str) -> tuple[str, str] | None:
         from ..core.store import Store
 
         try:
             with Store() as store:
                 task = store.task_read(task_id)
             if not task:
-                return
+                return None
             gateway = str(task.get("gateway", "")).strip()
             conversation_id = str(task.get("conversation_id", "")).strip()
-            if gateway and conversation_id:
-                self._typing_targets[f"task-{task_id}"] = (gateway, conversation_id)
-                asyncio.ensure_future(
-                    self._send_typing_control(gateway, conversation_id, "typing_start")
-                )
+            return self._normalize_typing_target(gateway, conversation_id)
         except Exception:
-            logger.debug("Failed to register typing target for task %s", task_id)
+            logger.debug("Failed to resolve typing target for task %s", task_id)
+            return None
+
+    def _register_typing_target(self, agent_key: str, gateway: str, conversation_id: str) -> None:
+        target = self._normalize_typing_target(gateway, conversation_id)
+        if target is None:
+            return
+        previous = self._typing_targets.get(agent_key)
+        if previous == target:
+            return
+        other_targets = {
+            value
+            for key, value in self._typing_targets.items()
+            if key != agent_key
+        }
+        self._typing_targets[agent_key] = target
+        if previous and previous != target and previous not in other_targets:
+            asyncio.ensure_future(
+                self._send_typing_control(previous[0], previous[1], "typing_stop")
+            )
+        if target not in other_targets:
+            asyncio.ensure_future(
+                self._send_typing_control(target[0], target[1], "typing_start")
+            )
 
     def _unregister_typing_target(self, agent_key: str) -> None:
         target = self._typing_targets.pop(agent_key, None)
         if not target:
             return
         gateway, conversation_id = target
-        # Only stop if no other task targets the same conversation
+        # Only stop if no other running agent targets the same conversation.
         if target not in self._typing_targets.values():
             asyncio.ensure_future(
                 self._send_typing_control(gateway, conversation_id, "typing_stop")

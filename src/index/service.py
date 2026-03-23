@@ -32,7 +32,6 @@ _MANIFEST_DB = _LOCALAGENT_DIR / "manifest.db"
 _INDEX_TOPICS = [
     "index.sync",
     "index.search",
-    "index.search_skills",
     "index.hybrid_search",
     "index.insert_entry",
     "index.upsert_entry",
@@ -50,9 +49,8 @@ def _get_source_factories() -> dict[str, type[IndexSource]]:
     """延迟加载 source factories，避免循环导入。"""
     global _SOURCE_FACTORIES
     if _SOURCE_FACTORIES is None:
-        from ..core import InboxSource, SkillsSource, TaskSource
+        from ..core import InboxSource, TaskSource
         _SOURCE_FACTORIES = {
-            "skills": SkillsSource,
             "inbox": InboxSource,
             "task": TaskSource,
         }
@@ -372,23 +370,6 @@ class IndexService:
         filt = payload.get("filter")
         embeddings = self._embedding.get_embeddings([query], text_type="query")
         results = self._vec_client.query(embeddings[0], topk=topk, filter=filt)
-        results = self._enrich_results(results)
-        return {"ok": True, "results": results}
-
-    def _handle_search_skills(self, payload: dict) -> dict:
-        self._ensure_vec_available()
-        query = payload["query"]
-        topk = payload.get("topk", 10)
-        path = payload["path"]
-
-        factories = _get_source_factories()
-        factory = factories.get("skills")
-        if factory:
-            self._sync(factory(path))  # type: ignore
-
-        assert self._vec_client is not None
-        dense = self._embedding.get_embeddings([query], text_type="query")[0]
-        results = self._vec_client.hybrid_query(dense, query, topk=topk)
         results = self._enrich_results(results)
         return {"ok": True, "results": results}
 
