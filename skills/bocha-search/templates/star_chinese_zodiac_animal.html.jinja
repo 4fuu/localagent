@@ -1,0 +1,13 @@
+{% extends "base.html.jinja" %}
+
+{% block extra_styles %}
+  .hero { padding: 24px 28px; text-align: center; border-bottom: 1px solid #f3f4f6; }
+  .name { font-size: 28px; font-weight: 800; color: {{ theme.primary }}; }
+{% endblock %}
+
+{% block body %}
+  <div class="hero"><div class="name">{{ star_name }}</div></div>
+  {% for label, value in rows %}
+  <div class="row"><div class="label">{{ label }}</div><div class="value">{{ value }}</div></div>
+  {% endfor %}
+{% endblock %}

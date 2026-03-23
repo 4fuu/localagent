@@ -1,0 +1,22 @@
+{% extends "base.html.jinja" %}
+
+{% block extra_styles %}
+  .hero { padding: 22px 28px; border-bottom: 1px solid #f3f4f6; }
+  .title { font-size: 22px; font-weight: 800; color: #1f2937; }
+  .desc { margin-top: 10px; font-size: 14px; line-height: 1.7; color: #4b5563; }
+  .warn { margin: 14px 28px; padding: 10px 14px; border-radius: 10px; background: #fff1f2; color: #be123c; font-size: 12px; }
+{% endblock %}
+
+{% block body %}
+  <div class="hero">
+    <div class="title">{{ med_title }}</div>
+    {% if med_desc %}<div class="desc">{{ med_desc }}</div>{% endif %}
+  </div>
+  {% for label, value in rows %}
+  <div class="row">
+    <div class="label">{{ label }}</div>
+    <div class="value">{{ value }}</div>
+  </div>
+  {% endfor %}
+  <div class="warn">仅供信息参考，不能替代专业诊疗意见。</div>
+{% endblock %}

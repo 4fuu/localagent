@@ -1,0 +1,40 @@
+{% extends "base.html.jinja" %}
+
+{% block extra_styles %}
+  .rate-hero {
+    padding: 24px 28px;
+    text-align: center;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .rate-pair {
+    font-size: 14px;
+    color: #6b7280;
+    margin-bottom: 8px;
+  }
+  .rate-value {
+    font-size: 36px;
+    font-weight: 700;
+    color: {{ theme.primary }};
+  }
+  .rate-unit {
+    font-size: 14px;
+    color: #6b7280;
+    margin-top: 4px;
+  }
+{% endblock %}
+
+{% block body %}
+  {% if rate_value is defined %}
+  <div class="rate-hero">
+    {% if rate_pair %}<div class="rate-pair">{{ rate_pair }}</div>{% endif %}
+    <div class="rate-value">{{ rate_value }}</div>
+    {% if rate_unit %}<div class="rate-unit">{{ rate_unit }}</div>{% endif %}
+  </div>
+  {% endif %}
+  {% for label, value in rows %}
+  <div class="row">
+    <div class="label">{{ label }}</div>
+    <div class="value">{{ value }}</div>
+  </div>
+  {% endfor %}
+{% endblock %}

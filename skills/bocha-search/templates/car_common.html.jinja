@@ -1,0 +1,19 @@
+{% extends "base.html.jinja" %}
+
+{% block extra_styles %}
+  .hero { padding: 20px 28px; border-bottom: 1px solid #f3f4f6; }
+  .name { font-size: 20px; font-weight: 800; color: #1f2937; }
+  .price { margin-top: 6px; font-size: 24px; font-weight: 700; color: {{ theme.primary }}; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; }
+  .grid .row { border-right: 1px solid #f3f4f6; }
+  .grid .row:nth-child(2n) { border-right: none; }
+{% endblock %}
+
+{% block body %}
+  <div class="hero"><div class="name">{{ car_name }}</div>{% if car_price %}<div class="price">{{ car_price }}</div>{% endif %}</div>
+  <div class="grid">
+    {% for label, value in rows %}
+    <div class="row"><div class="label">{{ label }}</div><div class="value">{{ value }}</div></div>
+    {% endfor %}
+  </div>
+{% endblock %}

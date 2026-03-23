@@ -1,0 +1,49 @@
+{% extends "base.html.jinja" %}
+
+{% block extra_styles %}
+  .phone-hero {
+    padding: 20px 28px;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .phone-name {
+    font-size: 20px;
+    font-weight: 700;
+    color: #1f2937;
+    margin-bottom: 4px;
+  }
+  .phone-price {
+    font-size: 24px;
+    font-weight: 700;
+    color: {{ theme.primary }};
+  }
+  .phone-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+  .phone-grid .row {
+    border-right: 1px solid #f3f4f6;
+  }
+  .phone-grid .row:nth-child(2n) {
+    border-right: none;
+  }
+{% endblock %}
+
+{% block body %}
+  {% if phone_name is defined %}
+  <div class="phone-hero">
+    <div class="phone-name">{{ phone_name }}</div>
+    {% if phone_price %}<div class="phone-price">{{ phone_price }}</div>{% endif %}
+  </div>
+  {% endif %}
+  {% if rows %}
+  <div class="phone-grid">
+    {% for label, value in rows %}
+    <div class="row">
+      <div class="label">{{ label }}</div>
+      <div class="value">{{ value }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endblock %}

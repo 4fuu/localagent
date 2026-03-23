@@ -1,0 +1,59 @@
+{% extends "base.html.jinja" %}
+
+{% block extra_styles %}
+  .star-hero {
+    padding: 24px 28px;
+    text-align: center;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .star-name {
+    font-size: 28px;
+    font-weight: 700;
+    color: {{ theme.primary }};
+  }
+  .star-date-range {
+    font-size: 13px;
+    color: #9ca3af;
+    margin-top: 4px;
+  }
+  .star-score-row {
+    display: flex;
+    padding: 12px 28px;
+    border-bottom: 1px solid #f3f4f6;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .star-score-label {
+    color: #6b7280;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .star-score-bar {
+    display: flex;
+    gap: 3px;
+  }
+  .star-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #e5e7eb;
+  }
+  .star-dot.filled {
+    background: {{ theme.primary }};
+  }
+{% endblock %}
+
+{% block body %}
+  {% if star_name is defined %}
+  <div class="star-hero">
+    <div class="star-name">{{ star_name }}</div>
+    {% if star_date_range %}<div class="star-date-range">{{ star_date_range }}</div>{% endif %}
+  </div>
+  {% endif %}
+  {% for label, value in rows %}
+  <div class="row">
+    <div class="label">{{ label }}</div>
+    <div class="value">{{ value }}</div>
+  </div>
+  {% endfor %}
+{% endblock %}

@@ -1,0 +1,34 @@
+{% extends "base.html.jinja" %}
+
+{% block extra_styles %}
+  .baike-hero {
+    padding: 20px 28px;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .baike-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #1f2937;
+    margin-bottom: 8px;
+  }
+  .baike-desc {
+    font-size: 14px;
+    color: #4b5563;
+    line-height: 1.7;
+  }
+{% endblock %}
+
+{% block body %}
+  {% if baike_title is defined %}
+  <div class="baike-hero">
+    <div class="baike-title">{{ baike_title }}</div>
+    {% if baike_desc %}<div class="baike-desc">{{ baike_desc }}</div>{% endif %}
+  </div>
+  {% endif %}
+  {% for label, value in rows %}
+  <div class="row">
+    <div class="label">{{ label }}</div>
+    <div class="value">{{ value }}</div>
+  </div>
+  {% endfor %}
+{% endblock %}

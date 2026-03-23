@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "rules": [
+    {
+      "skills": [
+        "pdf",
+        "pptx",
+        "xlxs",
+        "docx"
+      ],
+      "also_show": [
+        {
+          "skill": "py-run",
+          "reason": "该技能常涉及脚本执行与依赖处理，推荐同时使用 py-run 以适配本地运行环境。"
+        }
+      ]
+    }
+  ]
+}

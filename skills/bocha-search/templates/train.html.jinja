@@ -1,0 +1,89 @@
+{% extends "base.html.jinja" %}
+
+{% block extra_styles %}
+  .train-list { padding: 12px 20px 16px; }
+  .train-item {
+    background: #f8fafc;
+    border-radius: 12px;
+    padding: 14px 20px;
+    margin-bottom: 10px;
+  }
+  .train-item:last-child { margin-bottom: 0; }
+  .train-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .train-no {
+    font-size: 16px;
+    font-weight: 700;
+    color: {{ theme.primary }};
+  }
+  .train-price {
+    font-size: 16px;
+    font-weight: 600;
+    color: #1f2937;
+  }
+  .train-route {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .train-station {
+    text-align: center;
+  }
+  .train-station-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1f2937;
+  }
+  .train-station-time {
+    font-size: 12px;
+    color: #9ca3af;
+    margin-top: 2px;
+  }
+  .train-duration {
+    font-size: 12px;
+    color: #6b7280;
+    flex: 1;
+    text-align: center;
+    border-top: 1px dashed #d1d5db;
+    padding-top: 4px;
+    margin: 0 8px;
+  }
+{% endblock %}
+
+{% block body %}
+  {% if train_items %}
+  <div class="train-list">
+    {% for t in train_items %}
+    <div class="train-item">
+      <div class="train-top">
+        <span class="train-no">{{ t.train_no }}</span>
+        {% if t.price %}<span class="train-price">{{ t.price }}</span>{% endif %}
+      </div>
+      <div class="train-route">
+        <div class="train-station">
+          <div class="train-station-name">{{ t.from_station }}</div>
+          <div class="train-station-time">{{ t.depart_time }}</div>
+        </div>
+        <div class="train-duration">{{ t.duration }}</div>
+        <div class="train-station">
+          <div class="train-station-name">{{ t.to_station }}</div>
+          <div class="train-station-time">{{ t.arrive_time }}</div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+    {% for label, value in rows %}
+    <div class="row">
+      <div class="label">{{ label }}</div>
+      <div class="value">{{ value }}</div>
+    </div>
+    {% endfor %}
+  {% endif %}
+{% endblock %}

@@ -1,0 +1,63 @@
+{% extends "base.html.jinja" %}
+
+{% block extra_styles %}
+  .weather-grid { padding: 12px 20px 16px; }
+  .weather-day {
+    background: #f8fafc;
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .weather-day:last-child { margin-bottom: 0; }
+  .weather-day .day-label {
+    font-size: 18px;
+    font-weight: 700;
+    color: {{ theme.primary }};
+    min-width: 48px;
+  }
+  .weather-day .day-info { flex: 1; }
+  .weather-day .day-date {
+    font-size: 12px;
+    color: #9ca3af;
+    margin-bottom: 2px;
+  }
+  .weather-day .day-summary {
+    font-size: 15px;
+    font-weight: 600;
+    color: #1f2937;
+  }
+  .weather-day .day-detail {
+    font-size: 13px;
+    color: #6b7280;
+    margin-top: 2px;
+  }
+  .weather-day .day-temp {
+    font-size: 20px;
+    font-weight: 700;
+    color: #1f2937;
+    white-space: nowrap;
+  }
+{% endblock %}
+
+{% block body %}
+  <div class="weather-grid">
+  {% for d in weather_days %}
+    <div class="weather-day">
+      <div class="day-label">{{ d.label }}</div>
+      <div class="day-info">
+        <div class="day-date">{{ d.date }}</div>
+        <div class="day-summary">{{ d.summary }}</div>
+        {% if d.wind or d.humidity %}
+        <div class="day-detail">
+          {{ d.wind }}{% if d.wind and d.humidity %} · {% endif %}{{ "湿度 " + d.humidity if d.humidity else "" }}
+        </div>
+        {% endif %}
+      </div>
+      {% if d.temp %}<div class="day-temp">{{ d.temp }}</div>{% endif %}
+    </div>
+  {% endfor %}
+  </div>
+{% endblock %}

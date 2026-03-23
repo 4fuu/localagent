@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Noto Sans CJK SC", "Noto Sans SC",
+                 "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB",
+                 system-ui, "Noto Color Emoji", sans-serif;
+    background: #f0f2f5;
+    padding: {{ canvas_padding_top|default(20) }}px {{ canvas_padding_right|default(20) }}px {{ canvas_padding_bottom|default(20) }}px {{ canvas_padding_left|default(20) }}px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .card {
+    width: {{ width }}px;
+    background: #ffffff;
+    border-radius: 16px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08), 0 1px 4px rgba(0, 0, 0, 0.04);
+    overflow: hidden;
+  }
+  .card-header {
+    background: linear-gradient(135deg, {{ theme.primary }}, {{ theme.secondary }});
+    color: #ffffff;
+    padding: 24px 28px 20px;
+  }
+  .header-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .header-left {
+    display: flex;
+    align-items: center;
+  }
+  .card-header .icon { font-size: 28px; margin-right: 8px; }
+  .card-header .title {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+  .card-header .meta {
+    font-size: 12px;
+    opacity: 0.75;
+    text-align: right;
+    line-height: 1.5;
+  }
+  .card-header .subtitle {
+    font-size: 13px;
+    opacity: 0.8;
+    margin-top: 4px;
+  }
+  .card-body { padding: 8px 0; }
+
+  /* --- generic key-value rows --- */
+  .row {
+    display: flex;
+    padding: 12px 28px;
+    border-bottom: 1px solid #f3f4f6;
+    align-items: baseline;
+  }
+  .row:last-child { border-bottom: none; }
+  .row .label {
+    color: #6b7280;
+    font-size: 14px;
+    font-weight: 600;
+    min-width: 110px;
+    flex-shrink: 0;
+    padding-right: 16px;
+  }
+  .row .value {
+    color: #1f2937;
+    font-size: 14px;
+    line-height: 1.6;
+    word-break: break-word;
+    flex: 1;
+  }
+  .row .value.highlight {
+    font-weight: 700;
+    font-size: 16px;
+    color: {{ theme.primary }};
+  }
+
+  .card-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 28px 14px;
+    font-size: 11px;
+    color: #9ca3af;
+  }
+
+  {% block extra_styles %}{% endblock %}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="card-header">
+    <div class="header-top">
+      <div class="header-left">
+        <span class="icon">{{ theme.icon }}</span>
+        <span class="title">{{ theme.name }}</span>
+      </div>
+      {% if meta_time or meta_location %}
+      <div class="meta">
+        {% if meta_location %}{{ meta_location }}{% endif %}
+        {% if meta_time %}<br>{{ meta_time }}{% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% if subtitle %}<div class="subtitle">{{ subtitle }}</div>{% endif %}
+  </div>
+
+  <div class="card-body">
+    {% block body %}
+    {% for label, value in rows %}
+    <div class="row">
+      <div class="label">{{ label }}</div>
+      <div class="value">{{ value }}</div>
+    </div>
+    {% endfor %}
+    {% endblock %}
+  </div>
+
+  <div class="card-footer">
+    <span>{% if footer_left %}{{ footer_left }}{% endif %}</span>
+    <span>Bocha AI Search</span>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,217 @@
+# LocalAgent Configuration Example
+# Copy this file to config.toml and customize for your setup.
+
+# ---------------------------------------------------------------------------
+# Hub – core scheduler and agent pool settings
+# ---------------------------------------------------------------------------
+[hub]
+host = "127.0.0.1"
+port = 9600
+reap_interval = 5
+notify_delay = 3
+main_inbox_batch_size = 10
+main_per_conversation_limit = 5
+max_main_agents = 2
+max_task_agents = 16
+prioritize_admin = true
+startup_timeout = 10
+shutdown_timeout = 10
+agent_terminate_timeout = 30
+pending_request_timeout = 600
+db_scrub_interval = 86400
+trace_cleanup_interval = 86400
+trace_retention_days = 7
+pool_size_main = 1
+pool_size_task = 3
+
+# ---------------------------------------------------------------------------
+# LLM Providers – add API base URLs here; API keys are read from env vars
+#   qwen   -> DASHSCOPE_API_KEY
+#   openai -> OPENAI_API_KEY
+#   mimo   -> MIMO_API_KEY
+# You can override the env var name with `api_key_env`.
+# ---------------------------------------------------------------------------
+[provider.qwen]
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+[provider.openai]
+# base_url = "https://api.openai.com/v1"
+
+# ---------------------------------------------------------------------------
+# Chat model profiles – reference a provider and model name
+# ---------------------------------------------------------------------------
+[chat.qwen-plus]
+provider = "qwen"
+model = "qwen3.5-plus"
+image_input_mode = "multimodal"
+
+# [chat.gpt4o]
+# provider = "openai"
+# model = "gpt-4o"
+
+# ---------------------------------------------------------------------------
+# Embedding model profiles
+# You can set api_key_env to override the provider-level API key env var.
+# ---------------------------------------------------------------------------
+[embedding.qwen-v4]
+provider = "qwen"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+model = "text-embedding-v4"
+dimension = 1024
+
+# ---------------------------------------------------------------------------
+# Agent – which chat / embedding profiles the agents should use
+# ---------------------------------------------------------------------------
+[agent]
+main_chat = "qwen-plus"
+task_chat = "qwen-plus"
+embedding = "qwen-v4"
+
+# ---------------------------------------------------------------------------
+# Identity – map real-world persons to their gateway accounts
+#   Format: "<gateway>:<user_id>"
+# ---------------------------------------------------------------------------
+[identity.person.alice]
+accounts = ["telegram:123456789", "cli:alice"]
+
+# ---------------------------------------------------------------------------
+# Gateways – which messaging front-ends to activate
+# ---------------------------------------------------------------------------
+[gateway]
+active = ["cli"]
+
+[gateway.cli]
+enabled = true
+mailbox_dir = ""
+
+[gateway.telegram]
+enabled = false
+debug = false
+bot_token = ""        # Set via LOCALAGENT_GATEWAY_TELEGRAM_BOT_TOKEN env var or here
+poll_timeout = 25
+drop_pending_updates = true
+blocked_user_ids = []
+admin_user_ids = []
+group_message_mode = "mention"
+group_backlog_limit = 20
+command_prefixes = ["/localagent"]
+
+# Allow specific Telegram chats (list chat ID to allow access)
+# [gateway.telegram.chat.my-chat]
+# id = "123456789"
+# silent = false
+
+# ---------------------------------------------------------------------------
+# Retry policies – defaults and per-service overrides
+# ---------------------------------------------------------------------------
+[retry.default]
+max_retries = 3
+base_delay = 0.5
+max_delay = 8.0
+jitter = 0.1
+connect_timeout = 5.0
+request_timeout = 30.0
+retry_after_send = false
+
+[retry.services.gateway_service]
+connect_timeout = 3.0
+request_timeout = 10.0
+max_retries = 10
+base_delay = 0.3
+max_delay = 5.0
+
+[retry.services.index_service]
+connect_timeout = 3.0
+request_timeout = 120.0
+max_retries = 10
+base_delay = 0.3
+max_delay = 5.0
+
+[retry.services.runtime_broker]
+connect_timeout = 3.0
+request_timeout = 10.0
+max_retries = 10
+base_delay = 0.3
+max_delay = 5.0
+
+[retry.services.vec_server]
+connect_timeout = 10.0
+base_delay = 1.0
+max_delay = 10.0
+max_retries = 5
+
+[retry.services.vec_client]
+connect_timeout = 3.0
+request_timeout = 15.0
+max_retries = 3
+
+[retry.services.index_client]
+connect_timeout = 5.0
+request_timeout = 120.0
+max_retries = 2
+base_delay = 2.0
+max_delay = 10.0
+retry_after_send = true
+
+[retry.services.runtime_client]
+connect_timeout = 3.0
+request_timeout = 15.0
+max_retries = 3
+
+[retry.services.gateway_client]
+connect_timeout = 3.0
+request_timeout = 10.0
+max_retries = 3
+
+[retry.services.llm_chat]
+connect_timeout = 10.0
+request_timeout = 180.0
+max_retries = 3
+base_delay = 1.0
+max_delay = 15.0
+retry_after_send = true
+
+[retry.services.embedding_qwen]
+connect_timeout = 20.0
+request_timeout = 30.0
+max_retries = 3
+base_delay = 2.0
+max_delay = 15.0
+
+[retry.services.embedding_openai]
+connect_timeout = 20.0
+request_timeout = 30.0
+max_retries = 3
+base_delay = 2.0
+max_delay = 10.0
+
+[retry.services.telegram_api]
+connect_timeout = 10.0
+request_timeout = 30.0
+max_retries = 5
+base_delay = 1.0
+max_delay = 15.0
+
+[retry.services.agent_sub]
+connect_timeout = 5.0
+request_timeout = 15.0
+max_retries = 3
+
+[retry.services.main_tools]
+connect_timeout = 5.0
+request_timeout = 15.0
+max_retries = 3
+
+# ---------------------------------------------------------------------------
+# Sandbox – containerised execution for Task Agent commands (requires Podman)
+# ---------------------------------------------------------------------------
+[sandbox]
+runtime = "podman"
+command = "podman"
+image = "localhost/localagent-sandbox:latest"
+network = "slirp4netns"
+pull = "missing"
+read_only_rootfs = true
+tmpfs = ["/tmp", "/var/tmp"]
+pids_limit = 256
+user_writable_skills = false

@@ -1,0 +1,49 @@
+{% extends "base.html.jinja" %}
+
+{% block extra_styles %}
+  .metal-hero {
+    padding: 24px 28px;
+    text-align: center;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .metal-name {
+    font-size: 14px;
+    color: #6b7280;
+    margin-bottom: 8px;
+  }
+  .metal-price {
+    font-size: 36px;
+    font-weight: 700;
+    color: {{ theme.primary }};
+  }
+  .metal-unit {
+    font-size: 14px;
+    color: #9ca3af;
+    margin-top: 4px;
+  }
+  .metal-change {
+    font-size: 16px;
+    font-weight: 600;
+    margin-top: 4px;
+  }
+  .metal-up { color: #ef4444; }
+  .metal-down { color: #22c55e; }
+  .metal-flat { color: #6b7280; }
+{% endblock %}
+
+{% block body %}
+  {% if metal_price is defined %}
+  <div class="metal-hero">
+    {% if metal_name %}<div class="metal-name">{{ metal_name }}</div>{% endif %}
+    <div class="metal-price">{{ metal_price }}</div>
+    {% if metal_unit %}<div class="metal-unit">{{ metal_unit }}</div>{% endif %}
+    {% if metal_change %}<div class="metal-change {{ metal_color }}">{{ metal_change }}</div>{% endif %}
+  </div>
+  {% endif %}
+  {% for label, value in rows %}
+  <div class="row">
+    <div class="label">{{ label }}</div>
+    <div class="value">{{ value }}</div>
+  </div>
+  {% endfor %}
+{% endblock %}

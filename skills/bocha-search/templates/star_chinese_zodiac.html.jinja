@@ -1,0 +1,14 @@
+{% extends "base.html.jinja" %}
+
+{% block extra_styles %}
+  .hero { padding: 24px 28px; text-align: center; border-bottom: 1px solid #f3f4f6; }
+  .name { font-size: 26px; font-weight: 800; color: {{ theme.primary }}; }
+  .range { margin-top: 6px; font-size: 13px; color: #94a3b8; }
+{% endblock %}
+
+{% block body %}
+  <div class="hero"><div class="name">{{ star_name }}</div>{% if star_date_range %}<div class="range">{{ star_date_range }}</div>{% endif %}</div>
+  {% for label, value in rows %}
+  <div class="row"><div class="label">{{ label }}</div><div class="value">{{ value }}</div></div>
+  {% endfor %}
+{% endblock %}

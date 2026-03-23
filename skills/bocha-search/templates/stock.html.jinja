@@ -1,0 +1,62 @@
+{% extends "base.html.jinja" %}
+
+{% block extra_styles %}
+  .stock-hero {
+    padding: 20px 28px;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .stock-name {
+    font-size: 14px;
+    color: #6b7280;
+    margin-bottom: 4px;
+  }
+  .stock-price-row {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  .stock-price {
+    font-size: 32px;
+    font-weight: 700;
+  }
+  .stock-change {
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .stock-up { color: #ef4444; }
+  .stock-down { color: #22c55e; }
+  .stock-flat { color: #6b7280; }
+  .stock-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+  .stock-grid .row {
+    border-right: 1px solid #f3f4f6;
+  }
+  .stock-grid .row:nth-child(2n) {
+    border-right: none;
+  }
+{% endblock %}
+
+{% block body %}
+  {% if stock_price is defined %}
+  <div class="stock-hero">
+    {% if stock_name %}<div class="stock-name">{{ stock_name }}</div>{% endif %}
+    <div class="stock-price-row">
+      <span class="stock-price {{ stock_color }}">{{ stock_price }}</span>
+      {% if stock_change %}<span class="stock-change {{ stock_color }}">{{ stock_change }}</span>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+  {% if rows %}
+  <div class="stock-grid">
+    {% for label, value in rows %}
+    <div class="row">
+      <div class="label">{{ label }}</div>
+      <div class="value">{{ value }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endblock %}

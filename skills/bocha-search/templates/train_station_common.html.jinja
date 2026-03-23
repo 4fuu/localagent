@@ -1,0 +1,25 @@
+{% extends "base.html.jinja" %}
+
+{% block extra_styles %}
+  .list { padding: 14px 18px 18px; }
+  .stop { display: grid; grid-template-columns: 82px 1fr 82px; gap: 10px; align-items: center; padding: 12px 14px; border-bottom: 1px solid #eef2f7; }
+  .stop:last-child { border-bottom: none; }
+  .t { font-size: 12px; color: #94a3b8; }
+  .name { font-size: 14px; font-weight: 700; color: #1f2937; }
+  .wrap { background: #f8fafc; border-radius: 14px; overflow: hidden; margin: 14px 18px 10px; }
+{% endblock %}
+
+{% block body %}
+  <div class="wrap">
+    {% for t in train_items %}
+    <div class="stop">
+      <div class="t">{{ t.depart_time }}</div>
+      <div class="name">{{ t.from_station }}</div>
+      <div class="t" style="text-align:right">{{ t.arrive_time }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% for label, value in rows %}
+  <div class="row"><div class="label">{{ label }}</div><div class="value">{{ value }}</div></div>
+  {% endfor %}
+{% endblock %}

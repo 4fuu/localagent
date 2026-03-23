@@ -1,0 +1,29 @@
+{% extends "base.html.jinja" %}
+
+{% block extra_styles %}
+  .list { padding: 14px 18px 18px; }
+  .item { background: #f8fafc; border-radius: 14px; padding: 14px 16px; margin-bottom: 10px; }
+  .item:last-child { margin-bottom: 0; }
+  .top, .route { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .no { font-size: 16px; font-weight: 800; color: {{ theme.primary }}; }
+  .price { font-size: 13px; color: #0f172a; }
+  .station { width: 32%; }
+  .station-name { font-size: 14px; font-weight: 700; color: #1f2937; }
+  .time { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+  .dur { width: 36%; text-align: center; font-size: 12px; color: #64748b; }
+{% endblock %}
+
+{% block body %}
+  <div class="list">
+    {% for t in train_items %}
+    <div class="item">
+      <div class="top"><span class="no">{{ t.train_no }}</span><span class="price">{{ t.price }}</span></div>
+      <div class="route">
+        <div class="station"><div class="station-name">{{ t.from_station }}</div><div class="time">{{ t.depart_time }}</div></div>
+        <div class="dur">{{ t.duration }}</div>
+        <div class="station" style="text-align:right"><div class="station-name">{{ t.to_station }}</div><div class="time">{{ t.arrive_time }}</div></div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+{% endblock %}
