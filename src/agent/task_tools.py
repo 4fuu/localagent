@@ -1,6 +1,7 @@
 """Task agent context tools."""
 
 import json
+from pathlib import Path
 from typing import Any
 
 from ..core.secrets import conversation_scope, list_secrets, person_scope
@@ -171,10 +172,54 @@ def inspect_env(
     })
 
 
+@tool
+def inspect_cron(
+    state: AgentState,
+    cron_id: str = "",
+) -> str:
+    """只读查询当前已登记的定时任务，不创建、不修改、不取消。
+
+    适用场景：
+    - 用户询问“现在有哪些定时任务”。
+    - task 需要确认某个 cron 是否已存在、触发时间是什么、是否带 interval。
+
+    使用限制：
+    - 这是只读检查工具；创建、取消定时任务仍由 main agent 使用 `manage_cron`。
+    - 返回的是当前 Hub 持久化的 cron 列表快照。
+    """
+    cron_path = Path(".localagent/cron.json")
+    if not cron_path.is_file():
+        jobs: list[dict[str, Any]] = []
+    else:
+        try:
+            raw = json.loads(cron_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            return _result({"ok": False, "error": f"读取定时任务失败: {exc}"})
+        if not isinstance(raw, list):
+            return _result({"ok": False, "error": "cron.json 格式无效"})
+        jobs = [item for item in raw if isinstance(item, dict)]
+
+    normalized_cron_id = cron_id.strip()
+    if normalized_cron_id:
+        job = next(
+            (item for item in jobs if str(item.get("id", "")).strip() == normalized_cron_id),
+            None,
+        )
+        return _result({
+            "ok": True,
+            "cron_id": normalized_cron_id,
+            "exists": job is not None,
+            "job": job,
+        })
+
+    return _result({"ok": True, "jobs": jobs})
+
+
 __all__ = [
     "read_task",
     "read_context_ref",
     "search_conversation_history",
     "inspect_env",
+    "inspect_cron",
     "send_reply",
 ]

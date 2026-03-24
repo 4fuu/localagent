@@ -27,7 +27,7 @@ from typing import Any
 
 from websockets.asyncio.server import Server, ServerConnection, serve
 
-from ..agent.context_refs import read_task_context_refs, write_task_context_refs
+from ..agent.context_refs import read_task_context_refs, write_task_context_refs, write_tool_ref
 
 logger = logging.getLogger(__name__)
 
@@ -730,6 +730,16 @@ class Hub:
             return False
         new_task_id = result["id"]
         previous_context_refs = read_task_context_refs(prev_task_id)
+        if task_result and len(task_result) > 500:
+            result_ref_id = f"chain-result-{prev_task_id}"
+            try:
+                write_tool_ref(result_ref_id, {
+                    "source_task_id": prev_task_id,
+                    "result": task_result,
+                })
+                previous_context_refs = list({*previous_context_refs, result_ref_id})
+            except Exception:
+                logger.warning("Failed to write chain result ref for %s", prev_task_id, exc_info=True)
         if previous_context_refs:
             try:
                 write_task_context_refs(new_task_id, previous_context_refs)

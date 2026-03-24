@@ -27,22 +27,11 @@ def _topic_snapshot_text(topic: dict[str, Any]) -> str:
     goal = str(topic.get("goal", "")).strip()
     if goal:
         parts.append(f"goal: {goal}")
-    subgoal = str(topic.get("subgoal", "")).strip()
-    if subgoal and subgoal != goal:
-        parts.append(f"subgoal: {subgoal}")
-    for key in ("constraints", "facts", "unknowns", "artifacts"):
-        values = [str(item).strip() for item in (topic.get(key, []) or []) if str(item).strip()]
-        if values:
-            parts.append(f"{key}: " + " | ".join(values[:8]))
-    next_step = str(topic.get("next_step", "")).strip()
-    if next_step:
-        parts.append(f"next_step: {next_step}")
+    if topic.get("replied"):
+        parts.append("replied: true")
     last_task_id = str(topic.get("last_task_id", "")).strip()
     if last_task_id:
         parts.append(f"last_task_id: {last_task_id}")
-    summary = str(topic.get("last_result_summary", "")).strip()
-    if summary:
-        parts.append(f"summary: {summary}")
     return "\n".join(parts).strip()
 
 

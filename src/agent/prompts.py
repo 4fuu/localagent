@@ -58,18 +58,26 @@ MAIN_INPUT_MODEL = {
     "reading_rule": "读取 XML 输入时，优先按结构化字段理解，不要把整份 prompt 当普通长文本扫读。",
     "authoritative_sources": [
         _priority_item("inbox_messages", "highest", "当前轮用户输入"),
-        _priority_item("completed_tasks", "high", "task_done / task_done_batch 下的最新任务结果"),
+        _priority_item("completed_tasks", "high", "task_done / task_done_batch 下的最新任务结果；执行细节（facts/artifacts/constraints）的唯一来源"),
         _priority_item("task_done_context", "high", "判断是否已闭环交付、默认该结束还是继续", "仅在 task_done / task_done_batch 下提供"),
-        _priority_item("conversation_state.current_topic", "high", "当前会话连续性的真源"),
+        _priority_item("conversation_state.current_topic", "high", "当前会话连续性的真源；只含 goal/status/replied，不含执行细节"),
         _priority_item("pending_tasks", "medium", "判断是否已有等价动作在进行中"),
-        _priority_item("recent_window", "medium", "恢复最近线程状态"),
+        _priority_item("recent_window", "medium", "恢复最近线程状态；task_done 时已自动排除 completed_tasks 中的条目"),
         _priority_item("recall_items", "low", "补充候选证据，不负责决定当前 focus"),
         _priority_item("user_profiles", "low", "稳定、跨轮次可复用的用户事实"),
         _priority_item("conversation_env", "low", "只表示已保存的 key 名，不包含 value"),
         _priority_item("wake_context", "lowest", "辅助说明"),
     ],
+    "topic_model": [
+        "`current_topic` 只记录用户意图和进度指示器，不累积执行细节。",
+        "字段：`id`, `goal`（创建后不可变）, `status`（active/blocked/done）, `replied`（bool，用户是否已收到回复）, `source_message_id`, `last_task_id`, `updated_at`。",
+        "`status` 转换规则：execute/general 任务 blocked → topic blocked；active topic 在 reply/general 成功交付后自动收口为 done；reply 不负责写入执行细节。",
+        "`replied=true` 表示用户已收到至少一次回复，但不代表目标已达成；是否闭环以 `status` 是否收口为 `done` 为准。",
+        "执行过程中产出的 facts/artifacts/constraints 只存在于 `completed_tasks[*].outcome_json` 中，不会出现在 topic 里。",
+    ],
     "evidence_rules": [
         "`conversation_state.current_topic` 是当前会话连续性的真源，不靠模型猜、不靠历史语义检索猜。",
+        "任务执行细节（facts、artifacts、constraints）从 `completed_tasks[*].outcome_json` 读取，不要期望在 `current_topic` 中找到它们。",
         "`recent_window` 是最近几轮消息、任务、事件的确定性窗口。",
         "`recall_items` 只是补充候选证据，命中内容不代表已确认事实，不负责决定当前 focus。",
         "图片识别、网页卡片、搜索结果、转发/引用里的实体名都只是候选线索；除非用户明确确认，否则不得把它们写成已确认事实，也不得直接写死进 focus 或 task goal。",
@@ -93,13 +101,15 @@ MAIN_DISPATCH_POLICY = {
         "“发送文件/图片给用户”本质是回复动作，必须分发 `reply` 或 `general` 任务（task 内使用 `send_reply`），不得分发 `execute` 任务。",
     ],
     "task_done_handling": [
-        "先读取最新 task result、`completed_tasks`、`recent_window.tasks/events` 和 `conversation_state`，再决定下一步。",
+        "先读取最新 task result、`completed_tasks`、`task_done_context` 和 `conversation_state`，再决定下一步。",
         "你的职责是验收结果，而不是重复上一轮调度。只在以下几类动作中选一个：结果已足够交付时分发 `reply` 或 `general`；结果表明还需下一步时分发新的单步任务；结果暴露关键信息缺失或对象未确认时分发澄清任务；结果证明当前 focus 不成立时回到 main 重新选择 focus，但不要擅自替换成候选对象。",
-        "若用户可见结果已经发送或已有等价回复在 pending_tasks 中，禁止重复回复。",
+        "判断“用户是否已收到回复”时，以 `current_topic.replied` 和 `task_done_context.items[*].reply_sent` 为准，不要靠猜。",
+        "若 `current_topic.replied=true` 或已有等价回复在 pending_tasks 中，禁止重复回复。",
         "不要因为 task result 里提到新的候选实体、链接或仓库，就自动把它升级成新的 focus 或 confirmed entity。",
-        "若 task 明确失败、受阻或无结果，必须把“失败/阻塞”当作当前状态的一部分处理；不要假装任务已完成。",
+        "若 task 明确失败、受阻或无结果（topic.status=blocked），必须把“失败/阻塞”当作当前状态的一部分处理；不要假装任务已完成。",
         "重点读取 `task_done_context.items[*]`；它会明确标注本轮是否有新的用户消息、刚完成的任务是否已经完成用户可见交付、系统建议的默认动作。",
         "若 `task_done_context.has_new_inbox_messages=false`，且所有完成任务的 `default_action` 都是 `finish`，默认直接结束；不要主动分发“再次发送”“补充说明”“确认是否收到”“提醒往上翻看”等后续任务，除非用户刚刚明确提出该要求，或 task result 明确显示发送失败。",
+        "成功交付后的 active topic 会自动收口为 done；若 topic 已 blocked，则发送失败说明不会把它改写成 done。",
     ],
 }
 
@@ -125,7 +135,7 @@ TASK_INPUT_MODEL = {
         _priority_item("task.goal", "highest", "唯一任务边界"),
         _priority_item("task.task_type", "high", "决定可用工具和输出契约"),
         _priority_item("task.context_ref_ids", "high", "允许通过 `read_context_ref` 精确读取的附加上下文"),
-        _priority_item("conversation_state.current_topic", "medium", "当前会话焦点及其约束，仅作执行参考"),
+        _priority_item("conversation_state.current_topic", "medium", "当前会话焦点（仅含 goal/status/replied），仅作执行参考"),
         _priority_item("recent_window", "medium", "最近几轮上下文，仅用于补证据"),
         _priority_item("recall_items", "low", "补充候选证据，不代表要重启旧话题"),
         _priority_item("user_customization", "low", "只影响回复风格"),
@@ -135,7 +145,7 @@ TASK_INPUT_MODEL = {
         "`task.goal` 是唯一任务边界。",
         "未写进 goal 的对象、文件、链接、指标、收件人不得自动加入执行范围。",
         "`task.topic_id` 存在时，它比 `conversation_state.current_topic` 更接近当前任务归属；后者仅作补充参考。",
-        "`conversation_state.current_topic`、`recent_window`、`context_ref`、`recall_items` 都只是执行证据，不是额外需求。",
+        "`conversation_state.current_topic`（仅含 goal/status/replied，不含执行细节）、`recent_window`、`context_ref`、`recall_items` 都只是执行证据，不是额外需求。",
         "若某对象只出现在 recall、metadata 或搜索结果中而未在 goal 中确认，不得擅自把它当成已确认执行对象。",
         "`context_ref_ids` 非空时，优先 `read_context_ref` 按需读取。",
         "不要把 `wake_context` 当成主任务描述；主任务描述永远以 `task.goal` 为准。",
@@ -161,7 +171,7 @@ MAIN_MODE_GUIDES: dict[str, list[str]] = {
     "task_done": [
         "先验收 `completed_tasks` 与 `conversation_state`，再决定是否继续。",
         "优先参考 `task_done_context.items[*].default_action`；默认动作是 `finish` 时，不要硬造下一步。",
-        "若已有等价 reply pending 或用户已收到结果，禁止重复派发。",
+        "若 `current_topic.replied=true` 或已有等价 reply pending，禁止重复派发。",
     ],
     "task_done_batch": [
         "逐个验收 `completed_tasks`，不要把多个结果混成一个新 focus。",
@@ -193,6 +203,7 @@ TASK_TYPE_CONTRACTS: dict[str, dict[str, Any]] = {
             "若 `context_ref` 已显示主流程或其他任务已经完成写入/保存，你只负责如实确认结果，不要把它误报成仍需主调度处理。",
             "若发现完成任务需要执行工具操作，应停止扩展，输出阻塞原因交给 main 重新分发。",
             "若 goal 涉及会话 secret 的存在性确认，可使用 `inspect_env` 读取键名。",
+            "若 goal 涉及查看当前已登记的定时任务，可使用 `inspect_cron` 只读查询。",
         ],
         "result_requirements": [
             "必须说明：回复了什么；若未回复，为什么未回复。",
@@ -209,6 +220,7 @@ TASK_TYPE_CONTRACTS: dict[str, dict[str, Any]] = {
             "若执行结果需要交付给用户，应在结果中清楚说明“已产出什么、位于哪里”，由 main 再分发 `reply` 或 `general` 任务完成对外发送。",
             "若 goal 本质是“发消息、发图片、发文件给用户”，应输出阻塞点，交给 main 改派。",
             "若 goal 涉及会话 secret 管理，应输出阻塞点交给 main 使用 `manage_env` 处理；不要手写 secret 文件。",
+            "若 goal 涉及查看当前已登记的定时任务，可使用 `inspect_cron` 只读查询。",
         ],
         "result_requirements": [
             "必须说明：做了什么、依据了什么输入、用了哪些关键命令或步骤、产出了什么、结果在哪里。",
@@ -228,6 +240,7 @@ TASK_TYPE_CONTRACTS: dict[str, dict[str, Any]] = {
             "严禁使用 `bash_run`、`curl`、`python` 或 HTTP 请求直接调用 Telegram、Slack、Discord 等 bot 或 gateway API 来代替 `send_reply` 发送消息或文件。",
             "若 `context_ref` 已显示主流程或其他任务已经完成写入/保存，只负责如实确认结果，不要误报成仍需主调度处理。",
             "若 goal 涉及会话 secret 的存在性确认，可使用 `inspect_env` 读取键名。",
+            "若 goal 涉及查看当前已登记的定时任务，可使用 `inspect_cron` 只读查询。",
         ],
         "result_requirements": [
             "必须同时说明：执行结果，以及实际发送给用户的内容。",
@@ -498,8 +511,6 @@ def _format_state(item: dict[str, Any] | None) -> dict[str, Any]:
     entry["active_task_ids"] = source.get("active_task_ids", [])
     entry["last_user_message_id"] = source.get("last_user_message_id", "")
     entry["last_bot_message_id"] = source.get("last_bot_message_id", "")
-    entry["last_delivery"] = source.get("last_delivery", "")
-    entry["last_result_summary"] = source.get("last_result_summary", "")
     entry["recent_memory_ids"] = source.get("recent_memory_ids", [])
     entry["updated_at"] = source.get("updated_at", "")
     return entry
@@ -977,10 +988,22 @@ def _build_prompt_data(
     data["conversation_state"] = _format_state(conversation_state)
     if pending_tasks:
         data["pending_tasks"] = pending_tasks
+    completed_task_id_set = {str(t.get("id", "")).strip() for t in completed_tasks} if completed_tasks else set()
     data["recent_window"] = {
         "inbox_messages": [_format_inbox(item, path_map) for item in recent_window.get("inbox_messages", [])],
-        "tasks": [_format_task(item, path_map) for item in recent_window.get("tasks", [])],
-        "events": [_format_event(item) for item in recent_window.get("events", [])],
+        "tasks": [
+            _format_task(item, path_map)
+            for item in recent_window.get("tasks", [])
+            if str(item.get("id", "")).strip() not in completed_task_id_set
+        ],
+        "events": [
+            _format_event(item)
+            for item in recent_window.get("events", [])
+            if not (
+                str(item.get("event_type", "")).strip() == "task_completed"
+                and str((item.get("payload", {}) or {}).get("task_id", "")).strip() in completed_task_id_set
+            )
+        ],
     }
     if recall_items:
         data["recall_items"] = recall_items

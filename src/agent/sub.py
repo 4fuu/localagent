@@ -71,7 +71,7 @@ from .main_tools import (
 from .prompts import build_role_messages
 from .reply_tools import send_reply
 from .state import AgentState
-from .task_tools import inspect_env, read_context_ref, read_task, search_conversation_history
+from .task_tools import inspect_cron, inspect_env, read_context_ref, read_task, search_conversation_history
 from .topic_memory import archive_topic_snapshot
 from .tools import (
     apply_patch,
@@ -704,7 +704,7 @@ def _read_task_type(task_id: str) -> str:
 
 def _build_task_tools(task_type: str = "general") -> list:
     normalized = task_type.strip().lower()
-    common = [read_task, read_context_ref, search_conversation_history, inspect_env]
+    common = [read_task, read_context_ref, search_conversation_history, inspect_env, inspect_cron]
     reply_tools = [
         send_reply,
     ]

@@ -160,24 +160,24 @@ def _normalize_unique_texts(values: list[Any], *, limit: int = 12, max_chars: in
 
 def normalize_topic_item(value: dict[str, Any] | None) -> dict[str, Any]:
     source = value or {}
-    normalized = {
+    raw_status = str(source.get("status", "")).strip().lower()
+    if raw_status not in {"active", "blocked", "done"}:
+        if raw_status in {"delivered", "done", "waiting_user"}:
+            raw_status = {"delivered": "done", "waiting_user": "blocked"}.get(raw_status, "active")
+        else:
+            raw_status = "active"
+    goal = str(source.get("goal", "")).strip()
+    if not goal:
+        goal = str(source.get("subgoal", "")).strip()
+    return {
         "id": str(source.get("id", "")).strip() or _gen_id("topic"),
-        "status": str(source.get("status", "")).strip() or "active",
-        "goal": str(source.get("goal", "")).strip(),
-        "subgoal": str(source.get("subgoal", "")).strip(),
-        "constraints": _normalize_unique_texts(source.get("constraints", []) or [], limit=12),
-        "facts": _normalize_unique_texts(source.get("facts", []) or [], limit=12),
-        "unknowns": _normalize_unique_texts(source.get("unknowns", []) or [], limit=12),
-        "artifacts": _normalize_unique_texts(source.get("artifacts", []) or [], limit=12, max_chars=400),
-        "next_step": str(source.get("next_step", "")).strip()[:240],
+        "status": raw_status,
+        "goal": goal,
+        "replied": bool(source.get("replied", False)),
         "source_message_id": str(source.get("source_message_id", "")).strip(),
         "last_task_id": str(source.get("last_task_id", "")).strip(),
-        "last_result_summary": str(source.get("last_result_summary", "")).strip()[:500],
         "updated_at": str(source.get("updated_at", "")).strip() or _now_iso(),
     }
-    if not normalized["goal"] and normalized["subgoal"]:
-        normalized["goal"] = normalized["subgoal"]
-    return normalized
 
 
 def _extract_last_json_block(text: str) -> dict[str, Any] | None:
@@ -279,6 +279,7 @@ def conversation_state_topic_summaries(state: dict[str, Any] | None) -> list[dic
             "id": item.get("id", ""),
             "status": item.get("status", ""),
             "goal": item.get("goal", ""),
+            "replied": item.get("replied", False),
             "updated_at": item.get("updated_at", ""),
             "is_active": str(item.get("id", "")).strip() == active_topic_id,
         })
@@ -310,8 +311,6 @@ def conversation_state_bind_task(
     if chosen is None:
         chosen = normalize_topic_item({
             "goal": normalized_goal,
-            "subgoal": normalized_goal,
-            "next_step": normalized_goal,
             "source_message_id": normalized_message_id,
             "last_task_id": task_id,
             "status": "active",
@@ -320,11 +319,9 @@ def conversation_state_bind_task(
     else:
         chosen["updated_at"] = _now_iso()
         chosen["status"] = "active"
-        if normalized_goal:
-            if not str(chosen.get("goal", "")).strip():
-                chosen["goal"] = normalized_goal
-            chosen["subgoal"] = normalized_goal
-            chosen["next_step"] = normalized_goal
+        chosen["replied"] = False
+        if normalized_goal and not str(chosen.get("goal", "")).strip():
+            chosen["goal"] = normalized_goal
         if normalized_message_id:
             chosen["source_message_id"] = normalized_message_id
         if task_id:
@@ -361,8 +358,6 @@ def conversation_state_apply_task_result(
         target = normalize_topic_item({
             "id": topic_id or "",
             "goal": str(task.get("goal", "")).strip(),
-            "subgoal": str(task.get("goal", "")).strip(),
-            "next_step": "",
             "source_message_id": str(task.get("message_id", "")).strip(),
             "status": "active",
         })
@@ -370,60 +365,26 @@ def conversation_state_apply_task_result(
     task_type = str(task.get("task_type", "")).strip().lower()
     target["updated_at"] = _now_iso()
     target["last_task_id"] = str(task.get("id", "")).strip()
-    target["last_result_summary"] = (
-        normalized_outcome.get("summary")
-        or str(summary or "").strip()[:500]
-    )
-    target["facts"] = _normalize_unique_texts([
-        *(target.get("facts", []) or []),
-        *(normalized_outcome.get("facts", []) or []),
-    ], limit=12)
-    target["constraints"] = _normalize_unique_texts([
-        *(target.get("constraints", []) or []),
-        *(normalized_outcome.get("constraints", []) or []),
-    ], limit=12)
-    unresolved = [
-        item
-        for item in (target.get("unknowns", []) or [])
-        if str(item).strip() not in set(normalized_outcome.get("unknowns_resolved", []) or [])
-    ]
-    target["unknowns"] = _normalize_unique_texts([
-        *unresolved,
-        *(normalized_outcome.get("unknowns_open", []) or []),
-    ], limit=12)
-    target["artifacts"] = _normalize_unique_texts([
-        *(target.get("artifacts", []) or []),
-        *(normalized_outcome.get("artifacts", []) or []),
-    ], limit=12, max_chars=400)
-    if task_type in {"execute", "general"} and str(summary or "").strip():
-        target["artifacts"] = _normalize_unique_texts([
-            *(target.get("artifacts", []) or []),
-            str(strip_structured_outcome_block(summary)).strip()[:400],
-        ], limit=12, max_chars=400)
-    target["next_step"] = str(normalized_outcome.get("next_action", "")).strip()
-    if task_type != "reply" and not target["next_step"]:
-        target["subgoal"] = ""
-    status = str(normalized_outcome.get("status", "")).strip()
-    has_delivery = bool(normalized_outcome.get("user_visible_delivery")) or bool(
-        str(normalized_outcome.get("delivery", "")).strip()
-    )
-    if status == "blocked":
+
+    outcome_status = str(normalized_outcome.get("status", "")).strip()
+    target_status = str(target.get("status", "")).strip()
+    if task_type in {"execute", "general"} and outcome_status in {"blocked", "waiting_user"}:
         target["status"] = "blocked"
-    elif status == "waiting_user":
-        target["status"] = "waiting_user"
-    elif status == "delivered" or has_delivery:
-        target["status"] = "delivered"
-    elif status == "done":
+    elif (
+        task_type in {"reply", "general"}
+        and outcome_status in {"done", "delivered", "completed"}
+        and bool(target.get("replied"))
+        and target_status != "blocked"
+    ):
+        # A successful user-visible delivery closes the topic unless execution already proved it is blocked.
         target["status"] = "done"
-    elif str(target.get("status", "")).strip() in {"delivered", "done"}:
-        target["status"] = str(target.get("status", "")).strip()
-    else:
-        target["status"] = "active" if target["next_step"] or target["unknowns"] else "active"
+    elif task_type != "reply":
+        target["status"] = "active"
+
     updated_topics.insert(0, normalize_topic_item(target))
     return {
         "topics": normalize_conversation_topics(updated_topics),
         "active_topic_id": str(target.get("id", "")).strip(),
-        "last_result_summary": str(target.get("last_result_summary", "")).strip()[:500],
     }
 
 
@@ -446,23 +407,14 @@ def conversation_state_record_delivery(
             updated_topics.append(item)
     if target is None:
         target = normalize_topic_item({"id": normalized_topic_id or "", "status": "active"})
-    delivery_text = str(text or "").strip()[:400]
-    if delivery_text:
-        target["artifacts"] = _normalize_unique_texts([
-            *(target.get("artifacts", []) or []),
-            f"reply:{delivery_text}",
-        ], limit=12, max_chars=400)
-        target["last_result_summary"] = delivery_text[:500]
-        target["status"] = "delivered"
+    target["replied"] = True
     target["updated_at"] = _now_iso()
-    target["next_step"] = ""
     target["last_task_id"] = str(task_id or "").strip()
     updated_topics.insert(0, normalize_topic_item(target))
     return {
         "topics": normalize_conversation_topics(updated_topics),
         "active_topic_id": str(target.get("id", "")).strip(),
         "last_bot_message_id": str(message_id or "").strip(),
-        "last_delivery": delivery_text,
     }
 
 
@@ -1772,16 +1724,17 @@ class Store:
         enabled_skills: list[str] | None = None,
         session_constraints: list[str] | None = None,
         session_facts: list[str] | None = None,
-        current_focus: str | None = None,
-        resolved_entities: list[str] | None = None,
-        open_questions: list[str] | None = None,
         active_task_ids: list[str] | None = None,
         last_user_message_id: str | None = None,
         last_bot_message_id: str | None = None,
-        last_delivery: str | None = None,
-        last_result_summary: str | None = None,
         recent_memory_ids: list[str] | None = None,
         expected_version: int | None = None,
+        # Legacy params kept for call-site compat but ignored:
+        current_focus: str | None = None,
+        resolved_entities: list[str] | None = None,
+        open_questions: list[str] | None = None,
+        last_delivery: str | None = None,
+        last_result_summary: str | None = None,
     ) -> dict[str, Any]:
         normalized_conversation_id = conversation_id.strip()
         if not normalized_conversation_id:
@@ -1802,14 +1755,9 @@ class Store:
                 "enabled_skills": _normalize_unique_texts(enabled_skills or [], limit=64),
                 "session_constraints": _normalize_unique_texts(session_constraints or [], limit=16),
                 "session_facts": _normalize_unique_texts(session_facts or [], limit=16),
-                "current_focus": current_focus if current_focus is not None else "",
-                "resolved_entities": resolved_entities or [],
-                "open_questions": open_questions or [],
                 "active_task_ids": active_task_ids or [],
                 "last_user_message_id": last_user_message_id or "",
                 "last_bot_message_id": last_bot_message_id or "",
-                "last_delivery": last_delivery or "",
-                "last_result_summary": last_result_summary or "",
                 "recent_memory_ids": recent_memory_ids or [],
                 "created_at": now,
                 "updated_at": now,
@@ -1835,14 +1783,14 @@ class Store:
                         _json_dumps(payload["enabled_skills"]),
                         _json_dumps(payload["session_constraints"]),
                         _json_dumps(payload["session_facts"]),
-                        payload["current_focus"],
-                        _json_dumps(payload["resolved_entities"]),
-                        _json_dumps(payload["open_questions"]),
+                        "",  # current_focus (legacy)
+                        "[]",  # resolved_entities (legacy)
+                        "[]",  # open_questions (legacy)
                         _json_dumps(payload["active_task_ids"]),
                         payload["last_user_message_id"],
                         payload["last_bot_message_id"],
-                        payload["last_delivery"],
-                        payload["last_result_summary"],
+                        "",  # last_delivery (legacy)
+                        "",  # last_result_summary (legacy)
                         _json_dumps(payload["recent_memory_ids"]),
                         payload["created_at"],
                         payload["updated_at"],
@@ -1892,21 +1840,16 @@ class Store:
                 if session_facts is None
                 else _normalize_unique_texts(session_facts, limit=16)
             ),
-            "current_focus": str(existing.get("current_focus", "")) if current_focus is None else current_focus,
-            "resolved_entities": existing.get("resolved_entities", []) if resolved_entities is None else resolved_entities,
-            "open_questions": existing.get("open_questions", []) if open_questions is None else open_questions,
             "active_task_ids": existing.get("active_task_ids", []) if active_task_ids is None else active_task_ids,
             "last_user_message_id": str(existing.get("last_user_message_id", "")) if last_user_message_id is None else last_user_message_id,
             "last_bot_message_id": str(existing.get("last_bot_message_id", "")) if last_bot_message_id is None else last_bot_message_id,
-            "last_delivery": str(existing.get("last_delivery", "")) if last_delivery is None else last_delivery,
-            "last_result_summary": str(existing.get("last_result_summary", "")) if last_result_summary is None else last_result_summary,
             "recent_memory_ids": existing.get("recent_memory_ids", []) if recent_memory_ids is None else recent_memory_ids,
         }
         query = """UPDATE conversation_states
                SET version = ?, gateway = ?, user_id = ?, person_id = ?, is_multi_party = ?,
-                   active_topic_id = ?, topics = ?, enabled_skills = ?, session_constraints = ?, session_facts = ?, current_focus = ?,
-                   resolved_entities = ?, open_questions = ?, active_task_ids = ?,
-                   last_user_message_id = ?, last_bot_message_id = ?, last_delivery = ?, last_result_summary = ?,
+                   active_topic_id = ?, topics = ?, enabled_skills = ?, session_constraints = ?, session_facts = ?,
+                   active_task_ids = ?,
+                   last_user_message_id = ?, last_bot_message_id = ?,
                    recent_memory_ids = ?, updated_at = ?
                WHERE conversation_id = ?"""
         params: list[Any] = [
@@ -1920,14 +1863,9 @@ class Store:
             _json_dumps(updated["enabled_skills"]),
             _json_dumps(updated["session_constraints"]),
             _json_dumps(updated["session_facts"]),
-            updated["current_focus"],
-            _json_dumps(updated["resolved_entities"]),
-            _json_dumps(updated["open_questions"]),
             _json_dumps(updated["active_task_ids"]),
             updated["last_user_message_id"],
             updated["last_bot_message_id"],
-            updated["last_delivery"],
-            updated["last_result_summary"],
             _json_dumps(updated["recent_memory_ids"]),
             _now_iso(),
             normalized_conversation_id,
@@ -1988,14 +1926,9 @@ class Store:
                     enabled_skills=patch.get("enabled_skills"),
                     session_constraints=patch.get("session_constraints"),
                     session_facts=patch.get("session_facts"),
-                    current_focus=patch.get("current_focus"),
-                    resolved_entities=patch.get("resolved_entities"),
-                    open_questions=patch.get("open_questions"),
                     active_task_ids=patch.get("active_task_ids"),
                     last_user_message_id=patch.get("last_user_message_id"),
                     last_bot_message_id=patch.get("last_bot_message_id"),
-                    last_delivery=patch.get("last_delivery"),
-                    last_result_summary=patch.get("last_result_summary"),
                     recent_memory_ids=patch.get("recent_memory_ids"),
                     expected_version=expected_version,
                 )
@@ -2169,15 +2102,9 @@ class Store:
         )
         if not topics:
             legacy_focus = row["current_focus"] if "current_focus" in row.keys() else ""
-            legacy_questions = _json_loads(row["open_questions"] if "open_questions" in row.keys() else "[]", [])
-            legacy_facts = _json_loads(row["resolved_entities"] if "resolved_entities" in row.keys() else "[]", [])
-            if legacy_focus or legacy_questions or legacy_facts:
+            if legacy_focus:
                 topics = normalize_conversation_topics([{
                     "goal": legacy_focus,
-                    "subgoal": legacy_focus,
-                    "facts": legacy_facts,
-                    "unknowns": legacy_questions,
-                    "last_result_summary": row["last_result_summary"] if "last_result_summary" in row.keys() else "",
                     "updated_at": row["updated_at"] if "updated_at" in row.keys() else _now_iso(),
                 }])
         return {
@@ -2201,14 +2128,9 @@ class Store:
                 row["session_facts"] if "session_facts" in row.keys() else "[]",
                 [],
             ),
-            "current_focus": row["current_focus"],
-            "resolved_entities": _json_loads(row["resolved_entities"], []),
-            "open_questions": _json_loads(row["open_questions"], []),
             "active_task_ids": _json_loads(row["active_task_ids"], []),
             "last_user_message_id": row["last_user_message_id"],
             "last_bot_message_id": row["last_bot_message_id"],
-            "last_delivery": row["last_delivery"] if "last_delivery" in row.keys() else "",
-            "last_result_summary": row["last_result_summary"],
             "recent_memory_ids": _json_loads(row["recent_memory_ids"], []),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
