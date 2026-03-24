@@ -1,10 +1,10 @@
 
-
 import json
 import logging
 import re
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -14,8 +14,10 @@ from .base import Attachment, BaseGateway, InboundMessage
 from .registry import available_gateway_types, load_gateways
 from ..core.artifacts import ArtifactStore, is_artifact_ref
 from ..core.identity import infer_person_id, is_multi_party_metadata
-from ..core.store import Store
+from ..core.store import Store, conversation_state_active_topic, conversation_state_record_delivery
+from ..index import IndexClient
 from ..retry import RetryPolicy
+from ..agent.topic_memory import archive_topic_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,10 @@ class GatewayService:
         self._typing_active: set[tuple[str, str]] = set()
         self._typing_lock = threading.Lock()
         self._typing_thread: threading.Thread | None = None
+        self._delivery_queue: list[dict[str, Any]] = []
+        self._delivery_lock = threading.Lock()
+        self._delivery_event = threading.Event()
+        self._delivery_thread: threading.Thread | None = None
 
     def start(self) -> None:
         self._thread = threading.Thread(
@@ -60,6 +66,12 @@ class GatewayService:
             name="gateway-typing-ticker",
         )
         self._typing_thread.start()
+        self._delivery_thread = threading.Thread(
+            target=self._delivery_loop,
+            daemon=True,
+            name="gateway-delivery-worker",
+        )
+        self._delivery_thread.start()
 
         try:
             reconnect_attempt = 0
@@ -157,6 +169,10 @@ class GatewayService:
         if self._thread:
             self._thread.join(timeout=5)
             self._thread = None
+        self._delivery_event.set()
+        if self._delivery_thread:
+            self._delivery_thread.join(timeout=5)
+            self._delivery_thread = None
         logger.info("GatewayService stopped")
 
     def _on_inbound_message(self, inbound: InboundMessage) -> None:
@@ -368,6 +384,7 @@ class GatewayService:
         conversation_id = str(payload.get("conversation_id", "")).strip()
         text = str(payload.get("text", "")).strip()
         user_id = str(payload.get("user_id", "")).strip()
+        task_id = str(payload.get("task_id", "")).strip()
         metadata = payload.get("metadata")
         artifact_refs = payload.get("artifact_refs")
 
@@ -382,14 +399,16 @@ class GatewayService:
         if gateway is None:
             return {"ok": False, "error": f"gateway 未启用: {gateway_name}"}
 
-        result = gateway.send_message(
-            conversation_id,
-            text,
+        delivery_id = self._enqueue_delivery(
+            gateway=gateway_name,
+            conversation_id=conversation_id,
+            text=text,
             user_id=user_id,
+            task_id=task_id,
             metadata=metadata if isinstance(metadata, dict) else None,
             artifact_refs=artifact_refs if isinstance(artifact_refs, list) else None,
         )
-        return {"ok": True, "result": result}
+        return {"ok": True, "result": {"queued": True, "delivery_id": delivery_id}}
 
     def _handle_send_action(self, payload: dict) -> dict:
         gateway_name = str(payload.get("gateway", "")).strip()
@@ -423,6 +442,241 @@ class GatewayService:
                 gw = self._gateways.get(gateway_name)
                 if gw:
                     gw.send_action(conversation_id, "typing")
+
+    def _enqueue_delivery(
+        self,
+        *,
+        gateway: str,
+        conversation_id: str,
+        text: str,
+        user_id: str = "",
+        task_id: str = "",
+        metadata: dict[str, Any] | None = None,
+        artifact_refs: list[str] | None = None,
+    ) -> str:
+        delivery_id = f"gd-{uuid.uuid4().hex[:12]}"
+        item = {
+            "id": delivery_id,
+            "gateway": gateway,
+            "conversation_id": conversation_id,
+            "text": text,
+            "user_id": user_id,
+            "task_id": task_id,
+            "metadata": dict(metadata or {}),
+            "artifact_refs": list(artifact_refs or []),
+            "attempts": 0,
+            "next_attempt_at": time.monotonic(),
+            "created_at": time.time(),
+        }
+        with self._delivery_lock:
+            self._delivery_queue.append(item)
+        self._delivery_event.set()
+        return delivery_id
+
+    def _delivery_loop(self) -> None:
+        while not self._stopping.is_set():
+            item, wait_seconds = self._claim_due_delivery()
+            if item is None:
+                self._delivery_event.wait(timeout=wait_seconds)
+                self._delivery_event.clear()
+                continue
+            self._deliver_one(item)
+
+    def _claim_due_delivery(self) -> tuple[dict[str, Any] | None, float]:
+        now = time.monotonic()
+        with self._delivery_lock:
+            if not self._delivery_queue:
+                return None, 1.0
+            due_index: int | None = None
+            due_at = 0.0
+            next_due = None
+            for index, item in enumerate(self._delivery_queue):
+                candidate_due = float(item.get("next_attempt_at", 0.0))
+                if candidate_due <= now:
+                    due_index = index
+                    due_at = candidate_due
+                    break
+                if next_due is None or candidate_due < next_due:
+                    next_due = candidate_due
+            if due_index is not None:
+                return self._delivery_queue.pop(due_index), max(0.0, now - due_at)
+        if next_due is None:
+            return None, 1.0
+        return None, max(0.1, next_due - now)
+
+    def _deliver_one(self, item: dict[str, Any]) -> None:
+        gateway_name = str(item.get("gateway", "")).strip()
+        gateway = self._gateways.get(gateway_name)
+        if gateway is None:
+            self._reschedule_delivery(item, RuntimeError(f"gateway 未启用: {gateway_name}"))
+            return
+        try:
+            result = gateway.send_message(
+                str(item.get("conversation_id", "")).strip(),
+                str(item.get("text", "")).strip(),
+                user_id=str(item.get("user_id", "")).strip(),
+                metadata=(item.get("metadata") if isinstance(item.get("metadata"), dict) else None),
+                artifact_refs=(
+                    item.get("artifact_refs")
+                    if isinstance(item.get("artifact_refs"), list)
+                    else None
+                ),
+            )
+        except Exception as exc:
+            self._reschedule_delivery(item, exc)
+            return
+        self._finalize_delivery_success(item, result if isinstance(result, dict) else {})
+
+    def _reschedule_delivery(self, item: dict[str, Any], exc: Exception) -> None:
+        attempts = int(item.get("attempts", 0)) + 1
+        item["attempts"] = attempts
+        max_attempts = self._retry.max_retries + 1
+        if attempts >= max_attempts:
+            self._finalize_delivery_failure(item, str(exc))
+            return
+        delay = self._retry.backoff_delay(attempts - 1)
+        item["next_attempt_at"] = time.monotonic() + delay
+        item["last_error"] = str(exc)
+        with self._delivery_lock:
+            self._delivery_queue.append(item)
+        self._delivery_event.set()
+        logger.warning(
+            "Queued delivery retry scheduled id=%s attempt=%d delay=%.2fs error=%s",
+            item.get("id", ""),
+            attempts,
+            delay,
+            exc,
+        )
+
+    @staticmethod
+    def _extract_sent_message_id(result: dict[str, Any]) -> str:
+        results = result.get("results", [])
+        if not isinstance(results, list):
+            return ""
+        for entry in results:
+            if (
+                isinstance(entry, dict)
+                and entry.get("type") == "text"
+                and str(entry.get("message_id", "")).strip()
+            ):
+                return str(entry.get("message_id", "")).strip()
+        return ""
+
+    def _finalize_delivery_success(self, item: dict[str, Any], result: dict[str, Any]) -> None:
+        gateway = str(item.get("gateway", "")).strip()
+        conversation_id = str(item.get("conversation_id", "")).strip()
+        user_id = str(item.get("user_id", "")).strip()
+        task_id = str(item.get("task_id", "")).strip()
+        text = str(item.get("text", "")).strip()
+        sent_message_id = self._extract_sent_message_id(result)
+        task_data: dict[str, Any] | None = None
+        if task_id:
+            try:
+                with Store() as store:
+                    task_data = store.task_read(task_id)
+            except Exception:
+                logger.warning("Failed to read task for delivery success task=%s", task_id, exc_info=True)
+        try:
+            if text:
+                index_metadata = json.dumps(
+                    {
+                        "gateway": gateway,
+                        "conversation_id": conversation_id,
+                        "user_id": user_id,
+                        "topic_id": str((task_data or {}).get("topic_id", "")).strip(),
+                        "task_id": task_id,
+                    },
+                    ensure_ascii=False,
+                )
+                idx = IndexClient(self._hub_url)
+                try:
+                    idx.insert_reply(text, content=text, metadata=index_metadata)
+                finally:
+                    idx.close()
+        except Exception:
+            logger.warning("Failed to save queued reply record task=%s", task_id, exc_info=True)
+        try:
+            with Store() as store:
+                if conversation_id:
+                    store.conversation_state_apply(
+                        conversation_id,
+                        lambda current: conversation_state_record_delivery(
+                            current,
+                            task_id=task_id,
+                            topic_id=str((task_data or {}).get("topic_id", "")).strip(),
+                            text=text,
+                            message_id=sent_message_id or str(((item.get("metadata") or {}).get("reply_to_message_id", ""))).strip(),
+                        ),
+                        gateway=gateway,
+                        user_id=user_id,
+                        person_id=str((task_data or {}).get("person_id", "")).strip(),
+                    )
+                    store.conversation_event_append(
+                        conversation_id,
+                        "reply_sent",
+                        payload={
+                            "task_id": task_id,
+                            "message_id": sent_message_id,
+                            "text": text[:500],
+                        },
+                    )
+                    latest_state = store.conversation_state_read(conversation_id) or {}
+                    target_topic_id = str((task_data or {}).get("topic_id", "")).strip()
+                    target_topic = next(
+                        (
+                            entry
+                            for entry in (latest_state.get("topics", []) or [])
+                            if str(entry.get("id", "")).strip() == target_topic_id
+                        ),
+                        None,
+                    ) if target_topic_id else conversation_state_active_topic(latest_state)
+                    archive_topic_snapshot(
+                        self._hub_url,
+                        conversation_id=conversation_id,
+                        topic=target_topic,
+                    )
+        except Exception:
+            logger.warning("Queued reply state writeback failed task=%s", task_id, exc_info=True)
+
+    def _finalize_delivery_failure(self, item: dict[str, Any], error: str) -> None:
+        gateway = str(item.get("gateway", "")).strip()
+        conversation_id = str(item.get("conversation_id", "")).strip()
+        user_id = str(item.get("user_id", "")).strip()
+        task_id = str(item.get("task_id", "")).strip()
+        text = str(item.get("text", "")).strip()
+        logger.error(
+            "Queued delivery failed permanently id=%s task=%s conversation=%s error=%s",
+            item.get("id", ""),
+            task_id,
+            conversation_id,
+            error,
+        )
+        if conversation_id:
+            try:
+                with Store() as store:
+                    store.conversation_event_append(
+                        conversation_id,
+                        "reply_failed",
+                        payload={
+                            "task_id": task_id,
+                            "error": error[:500],
+                            "text": text[:500],
+                        },
+                    )
+            except Exception:
+                logger.warning("Failed to write reply_failed event task=%s", task_id, exc_info=True)
+            wake_message = "\n".join([
+                "[gateway-delivery-failed]",
+                f"gateway={gateway}",
+                f"conversation_id={conversation_id}",
+                f"user_id={user_id}",
+                f"task_id={task_id}",
+                f"summary={self._summarize_text(error, max_len=80)}",
+            ])
+            self._emit_hub_event_with_retry(
+                topic="agent.wake",
+                payload={"message": wake_message},
+            )
 
     def _handle_list(self, payload: dict) -> dict:
         del payload

@@ -89,6 +89,7 @@ class GatewayClient:
         conversation_id: str,
         text: str,
         user_id: str = "",
+        task_id: str = "",
         metadata: dict[str, Any] | None = None,
         artifact_refs: list[str] | None = None,
     ) -> dict[str, Any]:
@@ -99,6 +100,8 @@ class GatewayClient:
         }
         if user_id:
             payload["user_id"] = user_id
+        if task_id:
+            payload["task_id"] = task_id
         if metadata:
             payload["metadata"] = metadata
         if artifact_refs:

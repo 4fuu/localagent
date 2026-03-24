@@ -1,21 +1,16 @@
 """Shared reply tools used by main/task agents."""
 
 import json
-import logging
 from pathlib import Path
 from typing import Any
 
 from ..core.artifacts import ArtifactStore, is_artifact_ref
 from ..core.runtime_paths import RuntimePathMap
-from ..core.store import Store, conversation_state_active_topic, conversation_state_record_delivery
+from ..core.store import Store
 from ..gateway import GatewayClient
-from ..index import IndexClient
 from ..provider import tool
 from .sandbox import ToolSandbox
 from .state import AgentState
-from .topic_memory import archive_topic_snapshot
-
-logger = logging.getLogger(__name__)
 
 
 def _result(payload: dict[str, Any]) -> str:
@@ -145,6 +140,7 @@ def send_reply(
             conversation_id=cid,
             text=text,
             user_id=uid,
+            task_id=task_id,
             metadata=metadata if metadata else None,
             artifact_refs=normalized_artifacts if normalized_artifacts else None,
         )
@@ -153,78 +149,5 @@ def send_reply(
     finally:
         client.close()
 
-    if text.strip():
-        try:
-            index_metadata = json.dumps(
-                {
-                    "gateway": gw,
-                    "conversation_id": cid,
-                    "user_id": uid,
-                    "topic_id": str((task_data or {}).get("topic_id", "")).strip(),
-                    "task_id": task_id,
-                },
-                ensure_ascii=False,
-            )
-            idx = IndexClient(hub_url)
-            try:
-                idx.insert_reply(text, content=text, metadata=index_metadata)
-            finally:
-                idx.close()
-        except Exception as exc:
-            logger.warning("Failed to save reply record: %s", exc)
-
-    if text.strip():
-        sent_message_id = ""
-        try:
-            results = result.get("results", [])
-            if isinstance(results, list):
-                for item in results:
-                    if isinstance(item, dict) and item.get("type") == "text" and item.get("message_id"):
-                        sent_message_id = str(item.get("message_id"))
-                        break
-        except Exception:
-            sent_message_id = ""
-        try:
-            with Store() as store:
-                if cid:
-                    store.conversation_state_apply(
-                        cid,
-                        lambda current: conversation_state_record_delivery(
-                            current,
-                            task_id=task_id,
-                            topic_id=str((task_data or {}).get("topic_id", "")).strip(),
-                            text=text,
-                            message_id=sent_message_id or rtm_id,
-                        ),
-                        gateway=gw,
-                        user_id=uid,
-                        person_id=str((task_data or {}).get("person_id", "")).strip(),
-                    )
-                    store.conversation_event_append(
-                        cid,
-                        "reply_sent",
-                        payload={
-                            "task_id": task_id,
-                            "message_id": sent_message_id,
-                            "text": text[:500],
-                        },
-                    )
-                    latest_state = store.conversation_state_read(cid) or {}
-                    target_topic_id = str((task_data or {}).get("topic_id", "")).strip()
-                    target_topic = next(
-                        (
-                            item
-                            for item in (latest_state.get("topics", []) or [])
-                            if str(item.get("id", "")).strip() == target_topic_id
-                        ),
-                        None,
-                    ) if target_topic_id else conversation_state_active_topic(latest_state)
-                    archive_topic_snapshot(
-                        hub_url,
-                        conversation_id=cid,
-                        topic=target_topic,
-                    )
-        except Exception as exc:
-            logger.warning("Reply state writeback failed for task %s: %s", task_id, exc)
-
-    return _result({"ok": True, "result": result})
+    del result
+    return _result({"ok": True})

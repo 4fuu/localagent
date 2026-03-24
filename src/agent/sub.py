@@ -702,6 +702,16 @@ def _read_task_type(task_id: str) -> str:
     return task_type or "general"
 
 
+def _should_notify_main_for_task(task: dict[str, Any] | None, task_final_status: str) -> bool:
+    if task_final_status == "stopped":
+        return True
+    task_data = task or {}
+    outcome_status = str((task_data.get("outcome_json", {}) or {}).get("status", "")).strip().lower()
+    if outcome_status in {"blocked", "waiting_user"}:
+        return True
+    return bool(task_data.get("notify_main_on_finish", False))
+
+
 def _build_task_tools(task_type: str = "general") -> list:
     normalized = task_type.strip().lower()
     common = [read_task, read_context_ref, search_conversation_history, inspect_env, inspect_cron]
@@ -1073,6 +1083,7 @@ def _run_agent(args: argparse.Namespace) -> None:
     result = ""
     parsed_outcome: dict[str, Any] | None = None
     task_final_status = ""
+    final_task_record: dict[str, Any] | None = None
     should_skip_event = False
     try:
         result = asyncio.run(agent.run(user_input, images=images))
@@ -1102,6 +1113,7 @@ def _run_agent(args: argparse.Namespace) -> None:
                     else:
                         summary = (result if result else run_error[:500]) or "(no output)"
                         updated = store.task_complete(args.task, summary, outcome=parsed_outcome)
+                        final_task_record = updated
                         task_final_status = str((updated or {}).get("status", "done"))
                         if updated:
                             conversation_id = str(updated.get("conversation_id", "")).strip()
@@ -1237,12 +1249,11 @@ def _run_agent(args: argparse.Namespace) -> None:
                 "run_id": run_id,
             }
         else:
-            # Only emit task_done for completed tasks.
-            if task_final_status == "stopped":
-                should_skip_event = True
-            else:
+            if _should_notify_main_for_task(final_task_record, task_final_status):
                 event_topic = "agent.task_done"
                 event_payload = {"task_id": args.task}
+            else:
+                should_skip_event = True
         if not should_skip_event and event_topic:
             try:
                 _send_event(args.hub, event_topic, event_payload)

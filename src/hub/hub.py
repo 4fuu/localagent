@@ -713,6 +713,7 @@ class Hub:
                 result = store.task_create(
                     chained_goal,
                     task_type=next_task_type,
+                    notify_main_on_finish=bool(task.get("notify_main_on_finish", True)),
                     gateway=gateway,
                     conversation_id=conversation_id,
                     user_id=user_id,
@@ -1200,6 +1201,10 @@ class Hub:
             "trigger_at": payload["trigger_at"],
             "goal": payload["goal"],
         }
+        for key in ("gateway", "conversation_id", "user_id", "person_id"):
+            value = str(payload.get(key, "")).strip()
+            if value:
+                job[key] = value
         if payload.get("interval"):
             job["interval"] = payload["interval"]
         self._cron_jobs.append(job)
@@ -1261,13 +1266,33 @@ class Hub:
         self._cron_jobs = remaining
         self._save_cron_jobs()
         for job in due:
-            self._fire_cron(job)
+            try:
+                self._fire_cron(job)
+            except Exception:
+                logger.exception("Failed to fire cron job: %s", job.get("id", ""))
 
     def _fire_cron(self, job: dict) -> None:
-        from ..core.task import task_create
+        from ..core.store import Store
 
-        result = task_create(Path("task"), job["goal"])
-        task_id = result["id"]
+        with Store() as store:
+            result = store.task_create(
+                str(job.get("goal", "")).strip(),
+                task_type="general",
+                notify_main_on_finish=False,
+                gateway=str(job.get("gateway", "")).strip(),
+                conversation_id=str(job.get("conversation_id", "")).strip(),
+                user_id=str(job.get("user_id", "")).strip(),
+                person_id=str(job.get("person_id", "")).strip(),
+            )
+        task_id = str(result["id"]).strip()
+        if not str(job.get("conversation_id", "")).strip():
+            logger.warning(
+                "Cron job fired without conversation routing: id=%s gateway=%s conversation_id=%s user_id=%s",
+                job.get("id", ""),
+                job.get("gateway", ""),
+                job.get("conversation_id", ""),
+                job.get("user_id", ""),
+            )
         payload = self._build_startup_payload(
             wake_mode="cron",
             source_topic="cron.fire",

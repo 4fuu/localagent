@@ -94,6 +94,22 @@ def _normalize_task_type(value: str) -> str:
     return normalized if normalized in _TASK_TYPES else ""
 
 
+def _normalize_bool_param(value: Any, field_name: str) -> tuple[bool | None, str]:
+    if value is None:
+        return None, ""
+    if isinstance(value, bool):
+        return value, ""
+    if isinstance(value, int) and value in {0, 1}:
+        return bool(value), ""
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True, ""
+        if normalized in {"false", "0", "no", "off"}:
+            return False, ""
+    return None, f"{field_name} 必须是布尔值"
+
+
 def _normalize_skill_slug(value: str) -> str:
     return str(value or "").strip().lower().replace("_", "-")
 
@@ -559,6 +575,7 @@ def manage_task(
     action: str,
     goal: str = "",
     task_type: str = "",
+    notify_main_on_finish: bool | None = None,
     task_id: str = "",
     gateway: str = "",
     conversation_id: str = "",
@@ -584,17 +601,20 @@ def manage_task(
       - `reply`: 只用于回复/确认/澄清/交付，不得夹带执行动作。
       - `execute`: 只用于查询/读取/修改/运行等执行动作，不得要求 task 直接对外回复。
       - `general`: 仅在 goal 明确要求“执行后回复”且一步完成更稳时使用，不能作为默认兜底。
+    - `notify_main_on_finish` 必须显式指定：决定任务成功完成后是否通知 main agent；若任务未完成/受阻，则无论该值为何都强制通知 main。
     - 对同会话已有的等价未完成任务，应优先复用或等待，不要重复创建。
 
     `then` / `then_task_types` 规则：
     - 仅在步骤顺序稳定、每步输入输出可预期时使用。
     - 存在关键不确定性时禁止预先写整条链，应改为单步调度，待 task_done 后再决定下一步。
     - `then_task_types` 若提供，必须与 `then` 等长，并逐步声明 reply/execute/general。
+    - `then` 链会继承当前 task 的 `notify_main_on_finish`；链中间步骤不会单独唤醒 main，直到链耗尽或任务未完成。
 
     参数：
     - action (string): `start` / `status` / `stop`。
     - goal (string, 可选): 任务目标；`action=start` 时必填。
     - task_type (string, 可选): `reply` / `execute` / `general`。
+    - notify_main_on_finish (bool, 可选): `action=start` 时必填；控制成功完成后是否通知 main。
     - task_id (string, 可选): 查询或停止时使用。
     - gateway / conversation_id / user_id / message_id / reply_to_message_id:
       回复链路和会话追溯信息。`reply` 任务至少需要 gateway + conversation_id。
@@ -619,13 +639,19 @@ def manage_task(
         if not normalized_goal:
             return _result({"ok": False, "error": "goal 不能为空"})
         normalized_task_type = _normalize_task_type(task_type) or "general"
+        normalized_notify_main_on_finish, notify_err = _normalize_bool_param(
+            notify_main_on_finish,
+            "notify_main_on_finish",
+        )
         parsed_then, then_err = _coerce_list_param(then, "then")
         parsed_then_types, then_types_err = _coerce_list_param(then_task_types, "then_task_types")
         parsed_images, images_err = _coerce_list_param(images, "images")
         parsed_refs, refs_err = _coerce_list_param(context_ref_ids, "context_ref_ids")
-        for error in (then_err, then_types_err, images_err, refs_err):
+        for error in (notify_err, then_err, then_types_err, images_err, refs_err):
             if error:
                 return _result({"ok": False, "error": error})
+        if normalized_notify_main_on_finish is None:
+            return _result({"ok": False, "error": "notify_main_on_finish 必须显式指定 true 或 false"})
 
         normalized_then = _normalize_unique_strs(parsed_then)
         normalized_then_types = [_normalize_task_type(str(item)) for item in parsed_then_types]
@@ -704,6 +730,15 @@ def manage_task(
                     existing_task_id = str(existing_task.get("id", "")).strip()
                     existing_refs = read_task_context_refs(existing_task_id) if existing_task_id else []
                     merged_refs = list(existing_refs)
+                    if (
+                        existing_task_id
+                        and existing_task.get("notify_main_on_finish") != normalized_notify_main_on_finish
+                    ):
+                        store.task_update(
+                            existing_task_id,
+                            notify_main_on_finish=normalized_notify_main_on_finish,
+                        )
+                        existing_task = store.task_read(existing_task_id) or existing_task
                     if normalized_context_refs and existing_task_id:
                         for ref_id in normalized_context_refs:
                             if not tool_ref_exists(ref_id):
@@ -754,6 +789,7 @@ def manage_task(
             task = store.task_create(
                 normalized_goal,
                 task_type=normalized_task_type,
+                notify_main_on_finish=normalized_notify_main_on_finish,
                 topic_id=topic_id,
                 gateway=normalized_gateway,
                 conversation_id=normalized_conversation_id,
@@ -950,6 +986,28 @@ def manage_cron(
             "trigger_at": trigger_at,
             "goal": goal.strip(),
         }
+        normalized_conversation_id = str(getattr(state, "current_conversation_id", "")).strip()
+        normalized_person_id = str(getattr(state, "current_person_id", "")).strip()
+        if normalized_conversation_id:
+            payload["conversation_id"] = normalized_conversation_id
+            try:
+                with Store() as store:
+                    conversation_state = store.conversation_state_read(normalized_conversation_id) or {}
+                gateway = str(conversation_state.get("gateway", "")).strip()
+                user_id = str(conversation_state.get("user_id", "")).strip()
+                person_id = str(conversation_state.get("person_id", "")).strip() or normalized_person_id
+                if gateway:
+                    payload["gateway"] = gateway
+                if user_id:
+                    payload["user_id"] = user_id
+                if person_id:
+                    payload["person_id"] = person_id
+            except Exception:
+                logger.warning("manage_cron: failed to resolve conversation routing context", exc_info=True)
+                if normalized_person_id:
+                    payload["person_id"] = normalized_person_id
+        elif normalized_person_id:
+            payload["person_id"] = normalized_person_id
         if interval.strip():
             payload["interval"] = interval.strip()
         _send_event(hub_url, "cron.set", payload)

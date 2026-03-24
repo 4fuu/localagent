@@ -513,6 +513,7 @@ class Store:
                 id              TEXT PRIMARY KEY,
                 status          TEXT NOT NULL DEFAULT 'pending',
                 task_type       TEXT NOT NULL DEFAULT 'general',
+                notify_main_on_finish INTEGER NOT NULL DEFAULT 1,
                 goal            TEXT NOT NULL,
                 gateway         TEXT NOT NULL DEFAULT '',
                 conversation_id TEXT NOT NULL DEFAULT '',
@@ -738,6 +739,11 @@ class Store:
         )
         self._ensure_column(
             "tasks",
+            "notify_main_on_finish",
+            "INTEGER NOT NULL DEFAULT 1",
+        )
+        self._ensure_column(
+            "tasks",
             "then_task_types",
             "TEXT NOT NULL DEFAULT '[]'",
         )
@@ -935,6 +941,7 @@ class Store:
         goal: str,
         *,
         task_type: str = "general",
+        notify_main_on_finish: bool,
         topic_id: str = "",
         gateway: str = "",
         conversation_id: str = "",
@@ -954,12 +961,12 @@ class Store:
         now = _now_iso()
         self._db.execute(
             """INSERT INTO tasks
-               (id, status, task_type, goal, topic_id, gateway, conversation_id, user_id, person_id, message_id,
+               (id, status, task_type, notify_main_on_finish, goal, topic_id, gateway, conversation_id, user_id, person_id, message_id,
                 reply_to_message_id, parent_task_id, then_chain, then_task_types, images,
                 is_admin, result, outcome_json, memory_id, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                tid, "pending", task_type, goal,
+                tid, "pending", task_type, 1 if notify_main_on_finish else 0, goal,
                 topic_id,
                 gateway,
                 conversation_id,
@@ -1012,6 +1019,7 @@ class Store:
             "outcome_json",
             "then_chain",
             "then_task_types",
+            "notify_main_on_finish",
             "memory_id",
             "goal",
             "task_type",
@@ -1083,6 +1091,11 @@ class Store:
             "id": row["id"],
             "status": row["status"],
             "task_type": row["task_type"] if "task_type" in row.keys() else "general",
+            "notify_main_on_finish": (
+                bool(row["notify_main_on_finish"])
+                if "notify_main_on_finish" in row.keys()
+                else True
+            ),
             "goal": row["goal"],
             "topic_id": row["topic_id"] if "topic_id" in row.keys() else "",
             "gateway": row["gateway"] if "gateway" in row.keys() else "",

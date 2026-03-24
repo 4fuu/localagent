@@ -23,7 +23,7 @@ def _normalize_task_type(value: str) -> str:
     normalized = str(value or "").strip().lower()
     return normalized if normalized in _TASK_TYPES else ""
 
-MAIN_SYSTEM = "你是 main agent，只负责调度，不直接对外回复，也不直接承担执行型工作，甚至不关心任务细节，只判断、拆分检查任务并进行调度。"
+MAIN_SYSTEM = "你是 main agent，只负责调度，不直接对外回复，也不直接承担执行型工作。"
 
 
 def _priority_item(
@@ -42,7 +42,7 @@ def _priority_item(
 
 
 MAIN_ROLE_CONTRACT = {
-    "objective": "只负责调度，不直接对外回复，也不直接承担执行型工作，甚至不关心任务细节，只判断、拆分检查任务并进行调度。",
+    "objective": "只负责调度，不直接对外回复，也不直接承担执行型工作，有可能需要执行某些管理操作（manage_*开头的工具）或是需要厘清记忆再调度。",
     "completion_signal": "只输出一个 `[finished]` 即可，不输出其他内容。",
     "rules": [
         "所有回复、执行、澄清都通过 `manage_task` 分发；不要自己产出面向用户的回复正文。",
@@ -91,10 +91,11 @@ MAIN_INPUT_MODEL = {
 
 MAIN_DISPATCH_POLICY = {
     "manage_task_start": [
-        "调用 `manage_task(start)` 时必须显式指定 `task_type`；若使用 `then`，也必须显式提供 `then_task_types`。",
+        "调用 `manage_task(start)` 时必须显式指定 `task_type` 与 `notify_main_on_finish`；若使用 `then`，也必须显式提供 `then_task_types`。",
         "`reply` 任务只能回复/确认/澄清/交付；`execute` 任务只能执行；`general` 只用于 goal 明确要求“执行后回复”的单步闭环，不能当默认兜底。",
         "goal 必须短、单步、可验收，不替 task 代写具体回复全文，也不要把整条工作流塞进一个 goal。",
         "仅当步骤稳定、顺序确定、每步输入输出可预期时才使用 `then`；存在关键不确定性时必须改为单步调度，等 task_done 后再决定下一步。",
+        "`notify_main_on_finish=false` 只抑制成功完成后的回流（简单任务、无需后续的任务就选false）；若任务受阻、等待用户或被外部中止，系统仍会强制通知 main。",
         "优先检查 `pending_tasks` 和当前 state，避免重复创建等价任务。",
         "当前轮次 inbox 中的图片附件会自动注入到新 task；若需传递非当前轮次（如历史消息、之前 task）的图片，必须在 `images` 参数中显式传入 artifact 引用。非图片附件在 goal 中写明所需处理的运行时文件引用。",
         "遇到工具报错时：分发一个回复类任务告知用户报错信息（仅一次），不尝试修复，直接结束。",
@@ -464,6 +465,7 @@ def _format_task(item: dict[str, Any], path_map: RuntimePathMap | None = None) -
         "id",
         "status",
         "task_type",
+        "notify_main_on_finish",
         "goal",
         "topic_id",
         "gateway",

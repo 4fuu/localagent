@@ -13,6 +13,7 @@ def task_create(
     base: Path,
     goal: str,
     task_type: str = "general",
+    notify_main_on_finish: bool | None = None,
     gateway: str = "",
     conversation_id: str = "",
     user_id: str = "",
@@ -33,6 +34,8 @@ def task_create(
         "goal": goal,
         "created_at": now,
     }
+    if notify_main_on_finish is not None:
+        meta["notify_main_on_finish"] = bool(notify_main_on_finish)
     if conversation_id.strip():
         meta["conversation_id"] = conversation_id.strip()
     if gateway.strip():
